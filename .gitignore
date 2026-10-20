@@ -1,0 +1,15 @@
+.tools/
+.venv/
+.portaflow/
+node_modules/
+dist/
+test-results/
+playwright-report/
+*.egg-info/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+.env
+.DS_Store
+.env.*
+!.env.example
