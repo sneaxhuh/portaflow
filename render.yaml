@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: portaflow
+    runtime: node
+    repo: https://github.com/sneaxhuh/portaflow
+    branch: main
+    region: singapore
+    plan: 0.5c-512mb
+    numInstances: 1
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: node --import tsx server/index.ts
+    healthCheckPath: /api/health
+    disk:
+      name: portaflow-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: PORTAFLOW_HOST
+        value: 0.0.0.0
+      - key: PORTAFLOW_DB
+        value: /var/data/portaflow.sqlite
+      - key: PORTAFLOW_RPC
+        value: wss://test-node-v3.portaldot.dev
