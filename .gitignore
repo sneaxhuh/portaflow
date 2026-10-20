@@ -11,5 +11,6 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+.vercel/
 .env.*
 !.env.example

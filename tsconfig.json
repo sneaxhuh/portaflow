@@ -6,5 +6,5 @@
     "allowImportingTsExtensions": true, "resolveJsonModule": true,
     "esModuleInterop": true, "types": ["node"]
   },
-  "include": ["web", "server", "shared", "scripts", "tests", "vite.config.ts"]
+  "include": ["web", "server", "shared", "api", "scripts", "tests", "vite.config.ts"]
 }

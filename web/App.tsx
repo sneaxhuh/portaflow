@@ -2,7 +2,7 @@ import { createContext, useContext, useCallback, useEffect, useRef, useState, ty
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Copy, Download, ExternalLink, FileText, Grid2X2, Layers3, LoaderCircle, Menu, Plus, Search, ShieldCheck, Users, Wallet, X, Clock3, RefreshCw, Link2, AlertCircle, CheckCircle2, LogOut, Upload } from 'lucide-react';
 import { NETWORK, type Award, type AwardDetail, type NetworkState, type Overview, type TransactionPlan, type Treasury, type WalletState } from '../shared/types';
 import { formatAmount, parseAmount, shortAddress, UNIT, vestedRemaining } from '../shared/money';
-import { accounts, login, normalize, request, signTransaction, walletProviders, providerName, type NativeAccount, type NativeProvider } from './wallet';
+import { accounts, login, normalize, request, signTransaction, syncFinalizedReceipts, walletProviders, providerName, type NativeAccount, type NativeProvider } from './wallet';
 import { readAwardCsv, IMPORT_COLUMNS, type ImportRow } from '../shared/import';
 
 type Page = 'overview' | 'awards' | 'approvals' | 'recipients' | 'treasury' | 'award';
@@ -94,6 +94,7 @@ export default function App() {
   const committed = funded.reduce((sum, a) => sum + BigInt(a.totalRaw), 0n);
   const member = Boolean(address && treasury?.signatories.includes(address));
   const refresh = useCallback(async () => {
+    try { await syncFinalizedReceipts(); } catch { /* Finalized receipt proofs retry on the next refresh. */ }
     try { setData(await request<Overview>('/overview')); setLoaded(true); }
     catch { setLoaded(true); setError('The PortaFlow service is unavailable. Check that the local server is running.'); }
   }, []);
@@ -156,7 +157,7 @@ export default function App() {
       await signTransaction(review.plan, review, setProgress);
       setModal(null); setToast('Transaction finalized on Portaldot');
     } finally {
-      try { await request('/sync', {}); } catch { /* The indexer will reconcile after reconnecting. */ }
+      try { await syncFinalizedReceipts(); } catch { /* The verified receipt is retained for the next refresh. */ }
       await refresh();
     }
   });

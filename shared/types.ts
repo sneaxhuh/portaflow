@@ -38,6 +38,7 @@ export type PendingApproval = {
 };
 export type Receipt = {
   txHash: string; blockHash: string; blockNumber: number; awardId: string;
+  extrinsicIndex?: number;
   kind: 'approval' | 'funding' | 'cancellation' | 'unlock' | 'failed';
   signer: string; feeRaw: string; events: { section: string; method: string; data: unknown }[];
   timestamp: string;

@@ -1,10 +1,11 @@
 import { ApiPromise, WsProvider } from '@polkadot/api';
+import { randomUUID } from 'node:crypto';
 import { Keyring } from '@polkadot/keyring';
 import type { KeyringPair } from '@polkadot/keyring/types';
 import { NETWORK, type Award, type NetworkState, type PendingApproval, type Receipt, type TransactionPlan, type Treasury, type WalletState } from '../shared/types.js';
 import { vestedRemaining, UNIT } from '../shared/money.js';
 import { normalizeAddress, sameAddress } from './identity.js';
-import type { Store } from './store.js';
+import type { DataStore } from './store.js';
 import { awardTermsHash, fundingCall, transactionFromCall } from '../shared/calls.js';
 
 export const initialNetwork = (): NetworkState => ({
@@ -25,21 +26,35 @@ export class Chain {
   private timer?: ReturnType<typeof setInterval>;
   private busy = false;
   private scanning?: Promise<void>;
+  private connecting?: Promise<void>;
   private sponsor?: KeyringPair;
   private sponsorBusy = new Set<string>();
   private sponsoredAt = new Map<string, number>();
-  constructor(public store: Store, public rpc = process.env.PORTAFLOW_RPC || NETWORK.rpc) {}
+  constructor(public store: DataStore, public rpc = process.env.PORTAFLOW_RPC || NETWORK.rpc, public background = true) {}
+
+  async ready() {
+    if (this.api?.isConnected && this.state.verified) return;
+    if (!this.connecting) this.connecting = this.connect().finally(() => { this.connecting = undefined; });
+    return this.connecting;
+  }
 
   async connect() {
     if (this.timer) clearInterval(this.timer);
     await this.api?.disconnect();
     this.state.connected = false;
     this.state.verified = false;
-    const provider = new WsProvider(this.rpc, 6000, {}, 25_000);
+    const provider = new WsProvider(this.rpc, 6000, {}, 10_000);
     provider.on('disconnected', () => { this.state.connected = false; });
     provider.on('error', () => { this.state.error = 'The network connection is unavailable. Reconnecting…'; });
-    this.api = await ApiPromise.create({ provider, noInitWarn: true });
-    const api = this.api;
+    const api = new ApiPromise({ provider, noInitWarn: true });
+    this.api = api;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([api.isReadyOrError, new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('The Portaldot RPC connection timed out. Please retry shortly.')), 20_000);
+      })]);
+    } catch (error) { await api.disconnect(); throw error; }
+    finally { if (timeout) clearTimeout(timeout); }
     if (api.genesisHash.toHex() !== NETWORK.genesis) {
       await api.disconnect();
       throw new Error('The RPC does not match the pinned Portaldot V3 testnet genesis.');
@@ -60,11 +75,11 @@ export class Chain {
       depositFactorRaw: api.consts.multisig.depositFactor.toString(),
       error: undefined,
     };
-    if (process.env.PORTAFLOW_SPONSOR_URI) {
+    if (this.background && process.env.PORTAFLOW_SPONSOR_URI) {
       this.sponsor = new Keyring({ type: 'sr25519', ss58Format: 42 }).addFromUri(process.env.PORTAFLOW_SPONSOR_URI);
     }
-    await this.refresh();
-    this.timer = setInterval(() => { void this.tick(); }, 6000);
+    await this.refreshHead();
+    if (this.background) this.timer = setInterval(() => { void this.tick(); }, 6000);
   }
   requireApi(): ApiPromise {
     if (!this.api || !this.state.verified || !this.api.isConnected) throw new Error('Waiting for a verified Portaldot testnet connection.');
@@ -132,7 +147,7 @@ export class Chain {
     const termsHash = awardTermsHash(award, treasury);
     const batch = fundingCall(api, award, treasury);
     const result: Award = { ...award, callHex: batch.method.toHex(), callHash: batch.method.hash.toHex(), termsHash, specVersion: this.state.specVersion };
-    this.store.saveAward(result);
+    await this.store.saveAward(result);
     return result;
   }
   async estimate(call: any, signer: string, kind: string, deposit = 0n): Promise<TransactionPlan> {
@@ -149,7 +164,7 @@ export class Chain {
   async approvalPlan(award: Award, treasury: Treasury, signer: string, cancel = false): Promise<TransactionPlan> {
     const api = this.requireApi();
     await this.refresh();
-    const latest = this.store.award(award.id)!;
+    const latest = (await this.store.award(award.id))!;
     if (['funded', 'cancelled', 'failed'].includes(latest.status)) throw new Error('This award has already been finalized. Refresh its receipt.');
     if (this.state.lastSyncedBlock < this.state.finalizedBlock) throw new Error('Catching up with finalized blocks. Please try again shortly.');
     if (!treasury.signatories.includes(signer)) throw new Error('Only a treasury signer can approve this award.');
@@ -194,22 +209,30 @@ export class Chain {
   }
   async scan() {
     if (this.scanning) return this.scanning;
-    this.scanning = this.scanBlocks().finally(() => { this.scanning = undefined; });
+    const owner = randomUUID();
+    this.scanning = (async () => {
+      if (!await this.store.acquireLease('chain:' + NETWORK.genesis, owner, 120_000)) {
+        this.state.lastSyncedBlock = Number(await this.store.getMeta('cursor:' + NETWORK.genesis) ?? 0);
+        return;
+      }
+      try { await this.scanBlocks(owner); }
+      finally { await this.store.releaseLease('chain:' + NETWORK.genesis, owner); }
+    })().finally(() => { this.scanning = undefined; });
     return this.scanning;
   }
-  private async scanBlocks() {
+  private async scanBlocks(owner: string) {
     const api = this.requireApi();
     const cursorKey = 'cursor:' + NETWORK.genesis;
-    let cursor = Number(this.store.getMeta(cursorKey) ?? this.state.finalizedBlock);
+    const savedCursor = await this.store.getMeta(cursorKey);
     // Only prepared calls can have matching on-chain activity. Their creation
     // block precedes signing, so older history cannot contain an award receipt.
-    const preparedAwards = this.store.list<Award>('awards').filter(award => award.callHash);
+    const preparedAwards = (await this.store.list<Award>('awards')).filter(award => award.callHash);
     const earliestRelevantBlock = preparedAwards.length
       ? Math.min(...preparedAwards.map(award => award.createdBlock))
       : this.state.finalizedBlock;
-    cursor = Math.max(cursor, Math.min(earliestRelevantBlock, this.state.finalizedBlock));
+    let cursor = Math.max(Number(savedCursor ?? earliestRelevantBlock), Math.min(earliestRelevantBlock, this.state.finalizedBlock));
     this.state.lastSyncedBlock = cursor;
-    const end = Math.min(this.state.finalizedBlock, cursor + 120);
+    const end = Math.min(this.state.finalizedBlock, cursor + (this.background ? 120 : 24));
     // Fetch a small window concurrently, but apply receipts and persist the
     // cursor in block order. A failed request never skips an unprocessed block.
     for (let windowStart = cursor + 1; windowStart <= end; windowStart += 6) {
@@ -220,23 +243,37 @@ export class Chain {
         return { blockNumber, hash, records };
       }));
       for (const { blockNumber, hash, records } of blocks) {
+      if (!await this.store.acquireLease('chain:' + NETWORK.genesis, owner, 120_000)) return;
       // Most blocks have no award activity. Avoid downloading their extrinsics
       // or constructing a historical API just to advance the receipt cursor.
       const relevant = records.some(({ event }: any) => event.section === 'multisig'
         || event.section === 'vesting' && ['VestingUpdated', 'VestingCompleted'].includes(event.method));
       if (!relevant) {
         cursor = blockNumber;
-        this.store.setMeta(cursorKey, String(cursor));
+        await this.store.setMeta(cursorKey, String(cursor));
         this.state.lastSyncedBlock = cursor;
         continue;
       }
-      const [block, timestamp]: any[] = await Promise.all([api.rpc.chain.getBlock(hash), api.query.timestamp.now.at(hash)]);
-      const awards = this.store.list<Award>('awards');
+      await this.indexBlock(hash.toHex(), blockNumber, records);
+      cursor = blockNumber;
+      await this.store.setMeta(cursorKey, String(cursor));
+      this.state.lastSyncedBlock = cursor;
+      }
+    }
+    await this.store.setMeta(cursorKey, String(cursor));
+    this.state.lastSyncedBlock = cursor;
+  }
+  private async indexBlock(blockHash: string, blockNumber: number, suppliedRecords?: any, txHash?: string) {
+      const api = this.requireApi();
+      const [block, timestamp, records]: any[] = await Promise.all([api.rpc.chain.getBlock(blockHash), api.query.timestamp.now.at(blockHash),
+        suppliedRecords ?? api.query.system.events.at(blockHash)]);
+      if (txHash && !block.block.extrinsics.some((tx: any) => tx.hash.toHex() === txHash)) throw new Error('The transaction is not present in this finalized block.');
+      const awards = await this.store.list<Award>('awards');
       for (let index = 0; index < block.block.extrinsics.length; index++) {
         const events: any[] = records.filter((record: any) => record.phase.isApplyExtrinsic && record.phase.asApplyExtrinsic.toNumber() === index).map((record: any) => record.event);
         const tx = block.block.extrinsics[index];
         const fee = events.find(event => event.section === 'transactionPayment' && event.method === 'TransactionFeePaid');
-        const base = { txHash: tx.hash.toHex(), blockHash: hash.toHex(), blockNumber,
+        const base = { txHash: tx.hash.toHex(), blockHash, blockNumber, extrinsicIndex: index,
           signer: tx.isSigned ? tx.signer.toString() : '', feeRaw: fee ? fee.data[1].toString() : '0',
           timestamp: new Date(Number(timestamp.toString())).toISOString(),
           events: events.map(event => ({ section: event.section, method: event.method, data: event.data.toJSON() })) };
@@ -247,34 +284,49 @@ export class Chain {
             const callHash = event.data[isNew ? 2 : 3].toHex();
             const award = awards.find(item => item.callHash === callHash);
             if (!award) continue;
-            const treasury = this.store.treasury(award.treasuryId)!;
+            const treasury = (await this.store.treasury(award.treasuryId))!;
             if (!sameAddress(event.data[isNew ? 1 : 2].toString(), treasury.address)) continue;
             let kind: Receipt['kind'] = 'approval';
+            const terminal = ['funded', 'cancelled', 'failed'].includes(award.status);
             if (event.method === 'MultisigExecuted') {
               const success = fundingSucceeded(event.data[4].isOk, events.map(e => e.method));
-              award.status = success ? 'funded' : 'failed';
-              if (success) { award.fundingBlock = blockNumber; award.fundingTx = base.txHash; kind = 'funding'; }
-              else { award.failure = 'The multisig inner call failed. No award funding was confirmed. Review the receipt before creating a replacement.'; kind = 'failed'; }
-            } else if (event.method === 'MultisigCancelled') { award.status = 'cancelled'; kind = 'cancellation'; }
-            else award.status = 'awaiting_approval';
-            this.store.saveAward(award);
-            this.store.saveReceipt({ ...base, awardId: award.id, kind });
+              kind = success ? 'funding' : 'failed';
+              if (!terminal) {
+                award.status = success ? 'funded' : 'failed';
+                if (success) { award.fundingBlock = blockNumber; award.fundingTx = base.txHash; }
+                else award.failure = 'The multisig inner call failed. No award funding was confirmed. Review the receipt before creating a replacement.';
+              }
+            } else if (event.method === 'MultisigCancelled') { if (!terminal) award.status = 'cancelled'; kind = 'cancellation'; }
+            else if (!terminal) award.status = 'awaiting_approval';
+            await this.store.saveAward(award);
+            await this.store.saveReceipt({ ...base, awardId: award.id, kind });
           }
           if (event.section === 'vesting' && ['VestingUpdated', 'VestingCompleted'].includes(event.method)
             && tx.method.section === 'vesting' && ['vest', 'vestOther'].includes(tx.method.method)) {
             for (const award of awards.filter(item => item.status === 'funded' && sameAddress(item.recipient, event.data[0].toString()))) {
-              this.store.saveReceipt({ ...base, awardId: award.id, kind: 'unlock' });
+              await this.store.saveReceipt({ ...base, awardId: award.id, kind: 'unlock' });
             }
           }
         }
       }
-      cursor = blockNumber;
-      this.store.setMeta(cursorKey, String(cursor));
-      this.state.lastSyncedBlock = cursor;
+  }
+  async syncTransactions(transactions: { txHash: string; blockHash: string }[]) {
+    await this.refreshHead();
+    const api = this.requireApi();
+    const owner = randomUUID(), key = 'chain:' + NETWORK.genesis;
+    if (!await this.store.acquireLease(key, owner, 120_000)) throw new Error('Receipt syncing is already in progress. Retrying shortly.');
+    const accepted: string[] = [];
+    try {
+      for (const tx of transactions) {
+        const header = await api.rpc.chain.getHeader(tx.blockHash);
+        const height = header.number.toNumber();
+        if (height > this.state.finalizedBlock || (await api.rpc.chain.getBlockHash(height)).toHex() !== tx.blockHash) throw new Error('The submitted block is not on the finalized Portaldot chain.');
+        if (!await this.store.acquireLease(key, owner, 120_000)) throw new Error('Receipt sync lease expired. Please retry.');
+        await this.indexBlock(tx.blockHash, height, undefined, tx.txHash);
+        accepted.push(tx.txHash);
       }
-    }
-    this.store.setMeta(cursorKey, String(cursor));
-    this.state.lastSyncedBlock = cursor;
+    } finally { await this.store.releaseLease(key, owner); }
+    return accepted;
   }
   async runSponsor() {
     this.state.sponsorEnabled = false;
@@ -282,9 +334,9 @@ export class Chain {
     const cap = BigInt(process.env.PORTAFLOW_SPONSOR_MAX_FEE_RAW || String(UNIT / 10n));
     const budget = BigInt(process.env.PORTAFLOW_SPONSOR_DAILY_BUDGET_RAW || String(UNIT));
     const sponsorWallet = await this.wallet(this.sponsor.address);
-    if (BigInt(sponsorWallet.spendableRaw) < cap || this.store.sponsoredToday() >= budget) return;
+    if (BigInt(sponsorWallet.spendableRaw) < cap || await this.store.sponsoredToday() >= budget) return;
     this.state.sponsorEnabled = true;
-    const recipients = [...new Set(this.store.list<Award>('awards').filter(a => a.status === 'funded').map(a => a.recipient))];
+    const recipients = [...new Set((await this.store.list<Award>('awards')).filter(a => a.status === 'funded').map(a => a.recipient))];
     for (const recipient of recipients) {
       if (this.sponsorBusy.has(recipient) || Date.now() - (this.sponsoredAt.get(recipient) || 0) < 60_000) continue;
       const wallet = await this.wallet(recipient);
@@ -294,14 +346,13 @@ export class Chain {
       const call = api.tx.vesting.vestOther(recipient);
       const info = await call.paymentInfo(this.sponsor.address);
       const estimated = BigInt(info.partialFee.toString());
-      if (estimated > cap || this.store.sponsoredToday() + cap > budget) continue;
+      if (estimated > cap || await this.store.sponsoredToday() + cap > budget) continue;
       this.sponsorBusy.add(recipient);
       this.sponsoredAt.set(recipient, Date.now());
       try {
         await call.signAsync(this.sponsor, { nonce: -1 });
         // Reserve the full fee allowance before broadcast, including across restarts.
-        this.store.db.prepare('INSERT OR IGNORE INTO sponsored VALUES (?, ?, ?)')
-          .run(call.hash.toHex(), new Date().toISOString().slice(0, 10), cap.toString());
+        await this.store.reserveSponsored(call.hash.toHex(), new Date().toISOString().slice(0, 10), cap.toString());
         await new Promise<string>((resolve, reject) => {
           let unsub: (() => void) | undefined;
           let settled = false;

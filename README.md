@@ -2,7 +2,7 @@
 
 Contributor funding on Portaldot V3: shared treasury approvals, upfront payments, native vesting, and verifiable transaction receipts.
 
-Built with React, daisyUI, Fastify, SQLite, and the Polkadot API library connecting to **Portaldot**, not Polkadot's network. Transactions use Portaldot's native `multisig`, `utility`, `balances`, `vesting`, and `system` pallets; no custom contracts are required.
+Built with React, daisyUI, Fastify, MongoDB Atlas (hosted) or SQLite (local), and the Polkadot API library connecting to **Portaldot**, not Polkadot's network. Transactions use Portaldot's native `multisig`, `utility`, `balances`, `vesting`, and `system` pallets; no custom contracts are required.
 
 ## Run locally
 
@@ -31,8 +31,11 @@ The entire award is transferred to the recipient at funding; the vested portion 
 - Native RPC: `wss://test-node-v3.portaldot.dev`
 - Network: Portaldot V3 Testnet; native token: tPOT (14 decimals).
 - Configuration: see `.env.example`; set environment variables in your shell or hosting provider.
-- `render.yaml` runs the frontend and API as one service with a persistent SQLite disk. This configuration uses paid Render resources; review pricing before applying it.
-- Database files, sessions, local tools, and environment secrets are excluded from Git. A new deployment starts with an empty workspace database; local data is not automatically migrated.
+- `vercel.json` deploys the Vite frontend and a shared Node.js API function. Set `MONGODB_URI` and `MONGODB_DB=portaflow` in Vercel's environment settings. For a custom domain, also set `PORTAFLOW_ORIGIN` to its exact HTTPS origin.
+- Configure an Atlas database user restricted to this application's database, and network access for the deployment. Credentials belong in hosting secrets, never browser code.
+- MongoDB connections are reused by warm function instances. Sign-in challenges are consumed atomically; sessions expire; an expiring database lease serializes receipt indexing across instances.
+- Serverless mode uses request-driven chain refreshes. Finalized transactions are queued in the browser and verified against the canonical finalized chain by the API before receipts are saved. No always-running worker or scheduled unlock signer is required. Helpers can still sign unlocks through their own wallets.
+- Database files, sessions, local tools, and environment secrets are excluded from Git. To preserve an existing local workspace, set `MONGODB_URI` securely and run `npm run migrate:atlas` once. This imports treasury, award, receipt, and cursor data without copying login sessions or overwriting existing records. Local SQLite data remains intact.
 
 Wallet keys remain in the user's wallet. PortaFlow requests signatures through the browser extension.
 
