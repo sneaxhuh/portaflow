@@ -1,7 +1,6 @@
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
-import staticFiles from '@fastify/static';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -231,6 +230,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     });
   }
   if (options.serve !== false && existsSync(resolve('dist/index.html'))) {
+    const { default: staticFiles } = await import('@fastify/static');
     await app.register(staticFiles, { root: resolve('dist') });
     app.setNotFoundHandler((request, reply) => request.url.startsWith('/api/')
       ? reply.code(404).send({ error: 'Endpoint not found.' }) : reply.sendFile('index.html'));
