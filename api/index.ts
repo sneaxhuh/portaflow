@@ -1,8 +1,17 @@
 import { createApp } from '../server/app.js';
 
 let runtime: ReturnType<typeof createApp> | undefined;
+function logStartupFailure(error: unknown) {
+  const failure = error as { name?: unknown; code?: unknown; cause?: { code?: unknown }; reason?: { servers?: Map<unknown, { error?: { code?: unknown; cause?: { code?: unknown } } }> } };
+  const token = (value: unknown) => typeof value === 'number' ? value : typeof value === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(value) ? value : undefined;
+  const serverCodes = failure?.reason?.servers instanceof Map
+    ? [...failure.reason.servers.values()].flatMap(server => [token(server.error?.code), token(server.error?.cause?.code)]).filter(value => value !== undefined)
+    : [];
+  console.error(JSON.stringify({ event: 'portaflow_startup_failed', type: token(failure?.name), code: token(failure?.code),
+    causeCode: token(failure?.cause?.code), serverCodes: [...new Set(serverCodes)] }));
+}
 function getRuntime() {
-  if (!runtime) runtime = createApp({ serverless: true, serve: false }).catch(error => { runtime = undefined; throw error; });
+  if (!runtime) runtime = createApp({ serverless: true, serve: false }).catch(error => { runtime = undefined; logStartupFailure(error); throw error; });
   return runtime;
 }
 
@@ -27,7 +36,8 @@ export default {
       headers.set('Cache-Control', 'private, no-store');
       return new Response(request.method === 'HEAD' ? null : result.rawPayload, { status: result.statusCode, headers });
     } catch {
-      return Response.json({ error: 'PortaFlow could not connect to its database. Check the server configuration and try again.' }, { status: 503 });
+      return Response.json({ error: 'PortaFlow could not connect to its database. Check the server configuration and try again.' },
+        { status: 503, headers: { 'Cache-Control': 'private, no-store' } });
     }
   },
 };
