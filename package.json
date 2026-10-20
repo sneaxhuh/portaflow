@@ -6,6 +6,11 @@
   "engines": {
     "node": ">=22.13.0"
   },
+  "overrides": {
+    "fastify": {
+      "light-my-request": "6.6.0"
+    }
+  },
   "scripts": {
     "dev": "tsx watch server/index.ts",
     "dev:web": "vite --host 127.0.0.1",
