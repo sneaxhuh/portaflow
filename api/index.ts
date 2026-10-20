@@ -2,12 +2,15 @@ import { createApp } from '../server/app.js';
 
 let runtime: ReturnType<typeof createApp> | undefined;
 function logStartupFailure(error: unknown) {
-  const failure = error as { name?: unknown; code?: unknown; cause?: { code?: unknown }; reason?: { servers?: Map<unknown, { error?: { code?: unknown; cause?: { code?: unknown } } }> } };
+  const failure = error as { name?: unknown; message?: unknown; code?: unknown; cause?: { code?: unknown }; reason?: { servers?: Map<unknown, { error?: { code?: unknown; cause?: { code?: unknown } } }> } };
   const token = (value: unknown) => typeof value === 'number' ? value : typeof value === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(value) ? value : undefined;
+  const message = typeof failure?.message === 'string' ? failure.message : '';
+  const category = /bad auth|authentication failed|auth failed/i.test(message) ? 'authentication'
+    : /not authorized|not allowed|unauthorized/i.test(message) ? 'authorization' : undefined;
   const serverCodes = failure?.reason?.servers instanceof Map
     ? [...failure.reason.servers.values()].flatMap(server => [token(server.error?.code), token(server.error?.cause?.code)]).filter(value => value !== undefined)
     : [];
-  console.error(JSON.stringify({ event: 'portaflow_startup_failed', type: token(failure?.name), code: token(failure?.code),
+  console.error(JSON.stringify({ event: 'portaflow_startup_failed', type: token(failure?.name), code: token(failure?.code), category,
     causeCode: token(failure?.cause?.code), serverCodes: [...new Set(serverCodes)] }));
 }
 function getRuntime() {
