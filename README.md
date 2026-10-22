@@ -6,8 +6,6 @@ PortaFlow helps ecosystem foundations, DAOs, grant programs, and development tea
 
 Instead of coordinating payouts through spreadsheets, private messages, and a wallet controlled by one person, teams can run the full funding flow from one workspace while Portaldot's native multisig system keeps the treasury under shared control.
 
-> Built for the **Ecosystem DApps** track of Portaldot Hacker House 2026.
-
 ## The problem
 
 Contributor payments are usually assembled from disconnected tools. A spreadsheet defines the amounts, messages record informal approvals, and one operator submits the transfers. This makes it difficult for signers to verify the exact terms, for recipients to understand their release schedule, and for a program to reconcile decisions with finalized transactions.
@@ -172,20 +170,6 @@ npm run migrate:atlas
 
 The migration copies treasuries, awards, receipts, and indexing cursors. It does not copy login sessions or overwrite existing records.
 
-## Demo flow
-
-1. Connect a funded Portaldot native wallet.
-2. Create a 2-of-2 treasury and fund its derived address.
-3. Create an award with an immediate allocation and a short testnet vesting schedule.
-4. Approve it with the first treasury signer.
-5. Open the same award from another browser or computer and approve with the second signer.
-6. Watch the final approval atomically fund the award.
-7. Show the recipient balance, vesting progress, finalized activity, and receipt.
-8. When funds become eligible, connect the recipient or a helper and update the vesting lock.
-
-## Current scope
-
-Work references provide public context for an award. They do not automatically verify delivery or gate release. Once a native vesting award is funded, the sender cannot cancel it through PortaFlow; this commitment is shown before creation and approval.
 
 ## License
 
