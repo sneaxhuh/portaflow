@@ -4,6 +4,10 @@ import { base64Encode, decodeAddress, encodeAddress, createKeyMulti } from '@pol
 import { stringToHex, u8aToHex } from '@polkadot/util';
 import { fundingCall, roundFundingCall, transactionFromCall } from '../shared/calls';
 import { NETWORK, type Award, type PayoutRound, type TransactionPlan, type Treasury } from '../shared/types';
+import { request } from './api';
+import { rememberReceipt } from './receipts';
+export { syncFinalizedReceipts } from './receipts';
+export { request } from './api';
 
 export type NativeAccount = { address: string; signingAddress: string; meta: { name?: string; source: string; genesisHash?: string | null } };
 export type NativeProvider = { id: string; name: string };
@@ -44,38 +48,6 @@ export const normalize = (address: string) => {
 };
 export const same = (a: string, b: string) => u8aToHex(decodeAddress(a)) === u8aToHex(decodeAddress(b));
 
-export async function request<T>(path: string, data?: unknown): Promise<T> {
-  const response = await fetch('/api' + path, {
-    method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin',
-    headers: data === undefined ? {} : { 'Content-Type': 'application/json' },
-    body: data === undefined ? undefined : JSON.stringify(data),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'The request could not be completed.');
-  return result;
-}
-const RECEIPT_QUEUE = 'portaflow-finalized-transactions';
-type FinalizedTransaction = { txHash: string; blockHash: string };
-function queuedReceipts(): FinalizedTransaction[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(RECEIPT_QUEUE) || '[]');
-    return Array.isArray(value) ? value.filter(tx => /^0x[0-9a-f]{64}$/i.test(tx?.txHash) && /^0x[0-9a-f]{64}$/i.test(tx?.blockHash)).slice(-25) : [];
-  } catch { return []; }
-}
-function rememberReceipt(tx: FinalizedTransaction) {
-  try { localStorage.setItem(RECEIPT_QUEUE, JSON.stringify([...queuedReceipts().filter(row => row.txHash !== tx.txHash), tx].slice(-25))); } catch { /* Browser storage may be disabled. */ }
-}
-let receiptSync: Promise<void> | undefined;
-export function syncFinalizedReceipts(): Promise<void> {
-  if (receiptSync) return receiptSync;
-  const transactions = queuedReceipts().slice(0, 5);
-  if (!transactions.length) return Promise.resolve();
-  receiptSync = (async () => {
-    const result = await request<{ accepted: string[] }>('/sync', { transactions });
-    try { localStorage.setItem(RECEIPT_QUEUE, JSON.stringify(queuedReceipts().filter(tx => !result.accepted.includes(tx.txHash)))); } catch { /* Replaying verified receipts is safe. */ }
-  })().finally(() => { receiptSync = undefined; });
-  return receiptSync;
-}
 export async function accounts(source?: string): Promise<NativeAccount[]> {
   source = source || localStorage.getItem('portaflow-wallet-source') || '';
   if (!source) throw new Error('Choose a wallet in Connect wallet first.');

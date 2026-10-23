@@ -3,7 +3,7 @@ import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, CheckCheck, ChevronLeft
 import type { NetworkState, PayoutRound, RecipientPortal, RoundDetail, TransactionPlan, Treasury, TreasuryLedger, Verification } from '../shared/types';
 import { formatAmount, parseAmount, shortAddress, UNIT, vestedRemaining } from '../shared/money';
 import { IMPORT_COLUMNS, readAwardCsv, type ImportRow } from '../shared/import';
-import { normalize, request } from './wallet';
+import { request } from './api';
 import { Button } from './components/ui/button';
 import { Badge } from './components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
@@ -15,19 +15,10 @@ import { Progress } from './components/ui/progress';
 export type PaymentReview = { plan: TransactionPlan; round?: PayoutRound; treasury?: Treasury; recipient?: string };
 const message = (e: unknown) => e instanceof Error ? e.message : 'The request could not be completed.';
 const decimal = (n: bigint) => (n / UNIT).toString() + '.' + (n % UNIT).toString().padStart(14, '0');
-export function Amount({ raw = '0' }: { raw?: string }) { return <span className="op-money" title={formatAmount(raw, 14) + ' tPOT'}>{formatAmount(raw)} <small>tPOT</small></span>; }
+import { Amount, RoundStatus } from './RoundList';
 function Notice({ children }: { children: ReactNode }) { return <div className="op-notice" role="alert">{children}</div>; }
 function Loading() { return <div className="op-empty"><LoaderCircle className="spin" size={20} />Reading Portaldot…</div>; }
 function Blank({ title, children }: { title: string; children: ReactNode }) { return <div className="op-empty"><Layers3 size={24} /><h3>{title}</h3><p>{children}</p></div>; }
-function RoundStatus({ round }: { round: PayoutRound }) { return <Badge variant="outline" className={'op-status status-' + round.status}>{round.status === 'funded' ? 'Paid on-chain' : round.status === 'awaiting_approval' ? 'Needs approval' : round.status[0].toUpperCase() + round.status.slice(1)}</Badge>; }
-export function RoundList({ rounds, open, compact = false }: { rounds: PayoutRound[]; open: (id: string) => void; compact?: boolean }) {
-  const [filter, setFilter] = useState('all');
-  const rows = rounds.filter(r => filter === 'all' || r.status === filter).slice(0, compact ? 4 : 1000);
-  return <Card className="op-card"><CardHeader className="op-card-heading"><div><CardTitle>Payout rounds</CardTitle><CardDescription>Several payments. One shared approval.</CardDescription></div><Badge variant="secondary">{rounds.length} rounds</Badge></CardHeader>
-    {!compact && <Tabs value={filter} onValueChange={setFilter} className="op-filter"><TabsList><TabsTrigger value="all">All</TabsTrigger><TabsTrigger value="awaiting_approval">Needs approval</TabsTrigger><TabsTrigger value="funded">Paid</TabsTrigger></TabsList></Tabs>}
-    {rows.length ? <Table><TableHeader><TableRow><TableHead>Round</TableHead><TableHead>Payments</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead><span className="sr-only">Open round</span></TableHead></TableRow></TableHeader><TableBody>{rows.map(r => <TableRow key={r.id}><TableCell><button className="op-row-title" onClick={() => open(r.id)}>{r.title}<small>{new Date(r.createdAt).toLocaleDateString()} · {new Set(r.awards.map(a => a.recipient)).size} recipients</small></button></TableCell><TableCell>{r.awards.length}</TableCell><TableCell><Amount raw={r.totalRaw} /></TableCell><TableCell><RoundStatus round={r} /></TableCell><TableCell><Button size="icon-sm" variant="ghost" aria-label={'Open ' + r.title} onClick={() => open(r.id)}><ArrowUpRight /></Button></TableCell></TableRow>)}</TableBody></Table> : <Blank title={filter === 'all' ? 'Pay your contributors together' : 'No rounds with this status'}>Add payments manually or import a CSV. Your signers approve the complete round.</Blank>}
-  </Card>;
-}
 
 type Row = { key: string; title: string; recipient: string; amount: string; percent: string; workUrl: string };
 const newRow = (): Row => ({ key: crypto.randomUUID(), title: '', recipient: '', amount: '', percent: '100', workUrl: '' });
@@ -50,13 +41,15 @@ export function RoundForm({ treasury, network, busy, submit, close }: { treasury
     try {
       if (file.size > 40_000) throw new Error('Keep the CSV under 40 KB and 25 payments.');
       const source = await file.text(), parsed = readAwardCsv(source);
+      const { normalize } = await import('./wallet');
       parsed.forEach(p => normalize(p.recipient)); setCsv(source); setImported(parsed);
     } catch (e) { setError(message(e)); }
   };
-  const send = (e: FormEvent) => {
+  const send = async (e: FormEvent) => {
     e.preventDefault(); setError('');
     try {
       if (!payments.length) throw new Error('Add at least one payment.');
+      const { normalize } = await import('./wallet');
       for (const [i, p] of payments.entries()) {
         normalize(p.recipient); const amount = parseAmount(p.amount), upfront = p.upfront === '0' ? 0n : parseAmount(p.upfront);
         if (amount - upfront > 0n && amount - upfront < BigInt(network.minVestedRaw)) throw new Error('Payment ' + (i + 1) + ': use 100% immediate or increase the vested portion to ' + formatAmount(network.minVestedRaw) + ' tPOT.');
@@ -142,7 +135,7 @@ export function RecipientPage({ address, block, open, onReview, onWallet, networ
   useEffect(() => { setData(null); setError(''); }, [target]);
   useEffect(() => { let live = true; if (target) void request<RecipientPortal>('/recipient/' + encodeURIComponent(target)).then(d => { if (live) { setData(d); setError(''); } }).catch(e => { if (live) setError(message(e)); }); return () => { live = false; }; }, [target, block]);
   const unlock = async () => { if (!address) return onWallet(); setBusy(true); setError(''); try { onReview({ plan: await request('/recipient/' + target + '/unlock-plan', {}), recipient: target }); } catch (e) { setError(message(e)); } finally { setBusy(false); } };
-  return <div className="op-stack"><form className="op-address-search" onSubmit={e => { e.preventDefault(); try { setTarget(normalize(input)); setError(''); } catch (e) { setError(message(e)); } }}><Input aria-label="Recipient address" className="op-monospace" required placeholder="Look up any Portaldot recipient address" value={input} onChange={e => setInput(e.target.value)} /><Button type="submit" variant="outline">Look up <ArrowRight /></Button></form>
+  return <div className="op-stack"><form className="op-address-search" onSubmit={async e => { e.preventDefault(); try { const { normalize } = await import('./wallet'); setTarget(normalize(input)); setError(''); } catch (e) { setError(message(e)); } }}><Input aria-label="Recipient address" className="op-monospace" required placeholder="Look up any Portaldot recipient address" value={input} onChange={e => setInput(e.target.value)} /><Button type="submit" variant="outline">Look up <ArrowRight /></Button></form>
     {error && <Notice>{error}</Notice>}{target && !data && !error && <Loading />}
     {data && <><div className="op-metrics"><div><span>Funding across workspaces</span><strong><Amount raw={data.totalFundedRaw} /></strong><small>{data.awards.length} funded payments in PortaFlow</small></div><div><span>Currently spendable</span><strong><Amount raw={data.wallet.spendableRaw} /></strong><small>Whole wallet · includes other activity</small></div><div><span>Vesting lock</span><strong><Amount raw={data.wallet.vestingLockRaw} /></strong><small>Whole wallet · native chain state</small></div></div>
       <Card className="op-card op-unlock-card"><CardContent><div><span className="eyebrow">AVAILABLE TO UNLOCK</span><div className="op-total"><Amount raw={data.wallet.eligibleUnlockRaw} /></div><p className="fine-print">Update the vesting lock across this wallet’s schedules. The signing account pays the network fee.</p></div><Button disabled={busy || !networkReady || BigInt(data.wallet.eligibleUnlockRaw) === 0n} onClick={() => void unlock()}>{busy ? <LoaderCircle className="spin" /> : <ArrowDownLeft />}{address === target ? 'Unlock my funds' : 'Unlock for recipient'}</Button></CardContent></Card>
@@ -159,7 +152,7 @@ export function VerifyPage() {
   const [document, setDocument] = useState<unknown>(), [filename, setFilename] = useState(''), [result, setResult] = useState<Verification | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const load = async (file?: File) => { setError(''); setResult(null); setDocument(undefined); setFilename(file?.name || ''); if (!file) return; try { if (file.size > 65_000) throw new Error('Receipt must be under 65 KB.'); setDocument(JSON.parse(await file.text())); } catch (e) { setError(message(e)); } };
   const verify = async () => { setBusy(true); setError(''); setResult(null); try { setResult(await request<Verification>('/verify', document)); } catch (e) { setError(message(e)); } finally { setBusy(false); } };
-  return <div className="op-verifier"><Card className="op-card"><CardHeader><FileCheck2 size={25} className="op-verify-icon" /><CardTitle>Prove a payment happened.</CardTitle><CardDescription>Upload a downloaded award or round receipt. Verification reads the referenced block and transaction directly from the pinned Portaldot RPC, without looking up the award in PortaFlow’s database.</CardDescription></CardHeader><CardContent><label className="import-file"><Upload size={20} /><strong>{filename || 'Choose a PortaFlow receipt'}</strong><span>JSON · up to 65 KB · no wallet needed</span><input type="file" accept=".json,application/json" disabled={busy} onChange={e => void load(e.target.files?.[0])} /></label>{error && <Notice>{error}</Notice>}<Button className="op-full" disabled={!document || busy} onClick={() => void verify()}>{busy ? <LoaderCircle className="spin" /> : <ShieldCheck />}{busy ? 'Checking finalized chain evidence…' : 'Verify against Portaldot'}</Button><p className="fine-print op-verifier-note">Checks the derived treasury, exact payment manifest, finalized inclusion, successful atomic execution, on-chain commitment, and recipient transfer totals. This relies on the connected RPC for chain history.</p></CardContent></Card>
+  return <div className="op-verifier"><Card className="op-card"><CardHeader><FileCheck2 size={25} className="op-verify-icon" /><CardTitle>Verify a payment receipt</CardTitle><CardDescription>Upload a downloaded award or round receipt. Verification reads the referenced block and transaction directly from the pinned Portaldot RPC, without looking up the award in PortaFlow’s database.</CardDescription></CardHeader><CardContent><label className="import-file"><Upload size={20} /><strong>{filename || 'Choose a PortaFlow receipt'}</strong><span>JSON · up to 65 KB · no wallet needed</span><input type="file" accept=".json,application/json" disabled={busy} onChange={e => void load(e.target.files?.[0])} /></label>{error && <Notice>{error}</Notice>}<Button className="op-full" disabled={!document || busy} onClick={() => void verify()}>{busy ? <LoaderCircle className="spin" /> : <ShieldCheck />}{busy ? 'Checking finalized chain evidence…' : 'Verify against Portaldot'}</Button><p className="fine-print op-verifier-note">Checks the derived treasury, exact payment manifest, finalized inclusion, successful atomic execution, on-chain commitment, and recipient transfer totals. This relies on the connected RPC for chain history.</p></CardContent></Card>
     {result && <Card className={'op-card op-verification-result verification-' + result.status}><CardHeader><Badge variant="outline">{result.status === 'verified' ? 'Verified on Portaldot' : result.status === 'invalid' ? 'Verification failed' : 'Could not complete verification'}</Badge><CardTitle>{result.subject}</CardTitle>{result.blockNumber && <CardDescription>Funding block #{result.blockNumber.toLocaleString()}</CardDescription>}</CardHeader><CardContent><div className="op-checks">{result.checks.map((c, i) => <div key={i}><span className={c.passed ? 'check-pass' : 'check-fail'}>{c.passed ? <Check size={15} /> : '!'}</span><div><strong>{c.label}</strong><p>{c.detail}</p></div></div>)}</div>{result.txHash && <code className="op-hash">{result.txHash}</code>}</CardContent></Card>}
   </div>;
 }

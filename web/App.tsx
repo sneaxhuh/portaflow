@@ -1,12 +1,21 @@
-import { createContext, useContext, useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useRef, useState, lazy, Suspense, type FormEvent, type ReactNode } from 'react';
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Copy, Download, ExternalLink, FileText, Grid2X2, Layers3, LoaderCircle, Menu, Plus, Search, ShieldCheck, Users, Wallet, X, Clock3, RefreshCw, Link2, AlertCircle, CheckCircle2, LogOut, Upload } from 'lucide-react';
 import { NETWORK, type Award, type AwardDetail, type NetworkState, type Overview, type PayoutRound, type TransactionPlan, type Treasury, type WalletState } from '../shared/types';
 import { formatAmount, parseAmount, shortAddress, UNIT, vestedRemaining } from '../shared/money';
-import { accounts, login, normalize, request, signTransaction, syncFinalizedReceipts, walletProviders, providerName, type NativeAccount, type NativeProvider } from './wallet';
+import type { NativeAccount, NativeProvider } from './wallet';
+import { request } from './api';
+import { syncFinalizedReceipts } from './receipts';
 import { readAwardCsv, IMPORT_COLUMNS, type ImportRow } from '../shared/import';
-import { LedgerPage, RecipientPage, RoundForm, RoundList, RoundPage, VerifyPage } from './Operations';
+import { RoundList } from './RoundList';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './components/ui/dialog';
 import { Button } from './components/ui/button';
+
+const RoundForm = lazy(() => import('./Operations').then(module => ({ default: module.RoundForm })));
+const RoundPage = lazy(() => import('./Operations').then(module => ({ default: module.RoundPage })));
+const LedgerPage = lazy(() => import('./Operations').then(module => ({ default: module.LedgerPage })));
+const RecipientPage = lazy(() => import('./Operations').then(module => ({ default: module.RecipientPage })));
+const VerifyPage = lazy(() => import('./Operations').then(module => ({ default: module.VerifyPage })));
+function LoadingPage() { return <div className="page-loading" role="status"><LoaderCircle size={18} className="spin" /><span>Loading workspace…</span></div>; }
 
 type Page = 'overview' | 'awards' | 'approvals' | 'recipients' | 'treasury' | 'award' | 'rounds' | 'round' | 'ledger' | 'my-funds' | 'verify';
 type ModalKind = 'wallet' | 'treasury' | 'award' | 'round' | 'fund' | 'review' | 'guide' | 'import' | null;
@@ -22,6 +31,11 @@ const nav: { key: Page; label: string; icon: typeof Wallet }[] = [
   { key: 'ledger', label: 'Treasury ledger', icon: FileText },
   { key: 'my-funds', label: 'My funds', icon: ArrowDownLeft },
   { key: 'verify', label: 'Verify receipt', icon: ShieldCheck },
+];
+const navGroups: { label: string; keys: Page[] }[] = [
+  { label: 'Payments', keys: ['overview', 'rounds', 'awards', 'approvals'] },
+  { label: 'Treasury', keys: ['recipients', 'ledger', 'treasury'] },
+  { label: 'Personal', keys: ['my-funds', 'verify'] },
 ];
 const ErrorContext = createContext('');
 function route() {
@@ -64,7 +78,7 @@ function ReleaseProgress({ award, block, connected }: { award: Award; block: num
 function Modal({ title, eyebrow, children, close, busy, wide = false }: { title: string; eyebrow?: string; children: ReactNode; close: () => void; busy?: boolean; wide?: boolean }) {
   const error = useContext(ErrorContext);
   return <Dialog open onOpenChange={open => { if (!open && !busy) close(); }}><DialogContent className={'pf-dialog' + (wide ? ' pf-dialog-wide' : '')} showCloseButton={false} onEscapeKeyDown={event => { if (busy) event.preventDefault(); }} onPointerDownOutside={event => { if (busy) event.preventDefault(); }}>
-    <div className="modal-heading"><div>{eyebrow && <div className="eyebrow">{eyebrow}</div>}<DialogTitle>{title}</DialogTitle></div><button className="icon-button" aria-label="Close dialog" disabled={busy} onClick={close}><X size={18} /></button></div><DialogDescription className="sr-only">Review the details and choose an action below.</DialogDescription>{error && <div className="alert error-alert modal-error" role="alert"><AlertCircle size={15} /><span>{error}</span></div>}{children}
+    <div className="modal-heading"><div>{eyebrow && <div className="eyebrow">{eyebrow}</div>}<DialogTitle>{title}</DialogTitle></div><button className="icon-button" aria-label="Close dialog" disabled={busy} onClick={close}><X size={18} /></button></div><DialogDescription className="sr-only">Review the details and choose an action below.</DialogDescription>{error && <div className="alert error-alert modal-error" role="alert"><AlertCircle size={15} /><span>{error}</span></div>}<Suspense fallback={<LoadingPage />}>{children}</Suspense>
   </DialogContent></Dialog>;
 }
 function Empty({ icon: Icon = Layers3, title, text, action }: { icon?: typeof Layers3; title: string; text: string; action?: ReactNode }) {
@@ -87,6 +101,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [loaded, setLoaded] = useState(false);
+  const [refreshPending, setRefreshPending] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [review, setReview] = useState<Review | null>(null);
@@ -102,12 +117,39 @@ export default function App() {
   const recipients = [...new Set(funded.map(a => a.recipient))];
   const committed = funded.reduce((sum, a) => sum + BigInt(a.totalRaw), 0n);
   const member = Boolean(address && treasury?.signatories.includes(address));
-  const refresh = useCallback(async () => {
-    try { await syncFinalizedReceipts(); } catch { /* Finalized receipt proofs retry on the next refresh. */ }
-    try { setData(await request<Overview>('/overview')); setLoaded(true); }
-    catch { setLoaded(true); setError('The PortaFlow service is unavailable. Check that the local server is running.'); }
+  const refreshing = useRef<Promise<void> | null>(null);
+  const refresh: (force?: boolean) => Promise<void> = useCallback((force = false) => {
+    if (refreshing.current) return force ? refreshing.current.then(() => refresh()) : refreshing.current;
+    const task = (async () => {
+      setRefreshPending(true);
+      try { await syncFinalizedReceipts(); } catch { /* Finalized receipt proofs retry on the next refresh. */ }
+      try {
+        const next = await request<Overview>('/overview');
+        setData(previous => ({ ...next,
+          awards: JSON.stringify(previous.awards) === JSON.stringify(next.awards) ? previous.awards : next.awards,
+          rounds: JSON.stringify(previous.rounds) === JSON.stringify(next.rounds) ? previous.rounds : next.rounds,
+          treasuries: JSON.stringify(previous.treasuries) === JSON.stringify(next.treasuries) ? previous.treasuries : next.treasuries,
+        }));
+        setLoaded(true);
+      } catch { setLoaded(true); setError('The PortaFlow service is temporarily unavailable. Please retry shortly.'); }
+    })().finally(() => { refreshing.current = null; setRefreshPending(false); });
+    refreshing.current = task;
+    return task;
   }, []);
-  useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(), 6000); return () => clearInterval(timer); }, [refresh]);
+  useEffect(() => {
+    let stopped = false, revision = 0, timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      const currentRevision = ++revision;
+      clearTimeout(timer);
+      if (stopped) return;
+      if (document.hidden) return;
+      await refresh();
+      if (!stopped && revision === currentRevision) timer = setTimeout(() => void poll(), 10_000);
+    };
+    const focus = () => { void poll(); };
+    void poll(); document.addEventListener('visibilitychange', focus);
+    return () => { stopped = true; revision++; clearTimeout(timer); document.removeEventListener('visibilitychange', focus); };
+  }, [refresh]);
   useEffect(() => {
     const handler = () => { const value = route(); setPage(value.page); setAwardId(value.id); setSearch(''); setFilter('all'); setMobileOpen(false); };
     addEventListener('hashchange', handler); return () => removeEventListener('hashchange', handler);
@@ -147,7 +189,7 @@ export default function App() {
   };
   const openWallet = () => {
     setModal('wallet'); setAvailableAccounts([]); setAvailableProviders([]); setSelectedWallet('');
-    void act(async () => { setAvailableProviders(await walletProviders()); });
+    void act(async () => { const { walletProviders } = await import('./wallet'); setAvailableProviders(await walletProviders()); });
   };
   const needWallet = (kind: ModalKind) => { if (!address) openWallet(); else setModal(kind); };
   const prepareAction = (kind: 'approval' | 'cancel' | 'unlock') => {
@@ -155,7 +197,7 @@ export default function App() {
     void act(async () => {
     if (!detail) return;
     const result = await request<TransactionPlan & { cancelled?: boolean }>('/awards/' + detail.award.id + '/' + kind + '-plan', {});
-    if (result.cancelled) { await refresh(); setToast('Draft discarded'); return; }
+    if (result.cancelled) { await refresh(true); setToast('Draft discarded'); return; }
     setReview({ plan: result, award: detail.award, treasury: detail.treasury, recipient: detail.award.recipient });
     setModal('review');
     });
@@ -163,11 +205,12 @@ export default function App() {
   const submitReview = () => void act(async () => {
     if (!review) return;
     try {
+      const { signTransaction } = await import('./wallet');
       await signTransaction(review.plan, review, setProgress);
       setModal(null); setToast('Transaction finalized on Portaldot');
     } finally {
       try { await syncFinalizedReceipts(); } catch { /* The verified receipt is retained for the next refresh. */ }
-      await refresh();
+      await refresh(true);
     }
   });
   const selectedAwards = awards.filter(a => (page !== 'approvals' || ['draft', 'awaiting_approval'].includes(a.status))
@@ -176,11 +219,11 @@ export default function App() {
   const networkReady = network.connected && network.verified;
   const createButton = <><Button disabled={Boolean(address && treasury && !member)} title={address && treasury && !member ? 'Connect a treasury signer to create payments' : undefined} onClick={() => needWallet(treasury ? page === 'awards' ? 'award' : 'round' : 'treasury')}><Plus size={16} />{treasury ? page === 'awards' ? 'New award' : 'New payout round' : 'Create treasury'}</Button>{page === 'awards' && treasury && <button className="btn btn-outline" disabled={Boolean(address && !member)} onClick={() => needWallet('import')}><Upload size={14} />Import CSV</button>}</>;
 
-  function AwardTable({ compact = false }: { compact?: boolean }) {
+  function renderAwardTable({ compact = false }: { compact?: boolean } = {}) {
     const rows = compact ? selectedAwards.slice(0, 5) : selectedAwards;
     return <div className="table-scroll"><table className="table award-table"><thead><tr><th>Award / recipient</th><th>Amount</th><th>Status</th><th>Release schedule</th><th aria-label="View award" /></tr></thead><tbody>
       {rows.map(award => <tr key={award.id}><td><button className="row-title" onClick={() => go('award', award.id)}><span className="row-file"><FileText size={17} /></span><span><strong>{award.title}</strong><small>{shortAddress(award.recipient)}</small></span></button></td><td><Money raw={award.totalRaw} /></td><td><Status award={award} block={network.finalizedBlock} /></td><td><span className="schedule-label">{award.lockedRaw === '0' ? 'Immediate payment' : Math.round(award.durationBlocks * network.blockSeconds / 86400) >= 1 ? Math.round(award.durationBlocks * network.blockSeconds / 86400) + ' days estimated' : award.durationBlocks + ' blocks'}</span>{award.lockedRaw !== '0' && <small className="muted">From #{award.startBlock.toLocaleString()}</small>}</td><td><button className="icon-button" aria-label={'Open ' + award.title} onClick={() => go('award', award.id)}><ChevronRight size={16} /></button></td></tr>)}
-    </tbody></table>{!rows.length && <Empty title={search || filter !== 'all' ? 'No matching awards' : page === 'approvals' ? 'Your approval queue is clear' : 'Your first award starts here'}
+    </tbody></table>{!rows.length && <Empty title={search || filter !== 'all' ? 'No matching awards' : page === 'approvals' ? 'Your approval queue is clear' : 'No awards yet'}
       text={search || filter !== 'all' ? 'Try another search or status.' : 'Fund a contribution, agree on its release schedule, and give the recipient a clear path to their funds.'}
       action={!search && filter === 'all' && <button className="btn btn-outline btn-sm" onClick={() => needWallet(treasury ? 'award' : 'treasury')}><Plus size={14} />{treasury ? 'Create an award' : 'Set up a treasury'}</button>} />}</div>;
   }
@@ -193,8 +236,10 @@ export default function App() {
           {!data.treasuries.length && <option value="">Your workspace</option>}{data.treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select><ChevronDown size={13} />
       </label>
-      <div className="nav-section-label">WORKSPACE</div>
-      <nav className="menu">{nav.map(item => <a key={item.key} href={'#/' + item.key} className={page === item.key || page === 'award' && item.key === 'awards' || page === 'round' && item.key === 'rounds' ? 'nav-active' : ''}><item.icon size={17} strokeWidth={1.6} /><span>{item.label}</span>{item.key === 'approvals' && pendingCount > 0 && <span className="nav-count">{pendingCount}</span>}</a>)}</nav>
+      <div className="navigation-groups">{navGroups.map(group => <div className="nav-group" key={group.label}><div className="nav-section-label">{group.label}</div><nav className="menu" aria-label={group.label}>{group.keys.map(key => nav.find(item => item.key === key)!).map(item => {
+        const active = page === item.key || page === 'award' && item.key === 'awards' || page === 'round' && item.key === 'rounds';
+        return <a key={item.key} href={'#/' + item.key} className={active ? 'nav-active' : ''} aria-current={active ? 'page' : undefined}><item.icon size={17} strokeWidth={1.6} /><span>{item.label}</span>{item.key === 'approvals' && pendingCount > 0 && <span className="nav-count">{pendingCount}</span>}</a>;
+      })}</nav></div>)}</div>
       <div className="sidebar-bottom">
         <div className="sidebar-note"><ShieldCheck size={17} /><span>Your wallets.<br /><strong>Your treasury.</strong></span><button className="icon-button" aria-label="How PortaFlow works" onClick={() => setModal('guide')}><ArrowUpRight size={14} /></button></div>
         <button className="nav-secondary" onClick={() => setModal('guide')}><CircleHelp size={16} />How it works<ArrowUpRight size={13} /></button>
@@ -206,10 +251,10 @@ export default function App() {
     {mobileOpen && <button className="navigation-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <div className="workspace">
       <header className="topbar"><div className="breadcrumbs"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu size={19} /></button><span className="breadcrumb-workspace">{treasury?.name || 'Workspace'}</span><ChevronRight size={12} /><strong>{page === 'award' ? 'Award details' : page === 'round' ? 'Payout round' : nav.find(n => n.key === page)?.label}</strong></div>
-        <div className="topbar-actions"><span className="testnet-label">Testnet</span><button className="wallet-button" onClick={openWallet}><Wallet size={15} />{address ? shortAddress(address) : 'Connect wallet'}<ChevronDown size={12} /></button></div></header>
-      <main>
+        <div className="topbar-actions"><button className="icon-button refresh-button" aria-label="Refresh balances" title={refreshPending ? 'Updating balances…' : 'Refresh balances'} disabled={refreshPending} onClick={() => void refresh()}><RefreshCw size={15} className={refreshPending ? 'spin' : undefined} /></button><span className="testnet-label">Testnet</span><button className="wallet-button" onClick={openWallet}><Wallet size={15} />{address ? shortAddress(address) : 'Connect wallet'}<ChevronDown size={12} /></button></div></header>
+      <main><Suspense fallback={<LoadingPage />}>
         {!networkReady && loaded && <div className="network-notice"><LoaderCircle size={15} className="spin" /><span>{network.error || 'Connecting to Portaldot V3. Chain actions become available after network verification.'}</span></div>}
-        {page !== 'award' && page !== 'round' && <div className="page-heading"><div><div className="eyebrow">{page === 'overview' ? 'YOUR FUNDING WORKSPACE' : 'WORKSPACE / ' + page.replace('-', ' ').toUpperCase()}</div><h1>{page === 'overview' ? 'Treasury overview' : nav.find(n => n.key === page)?.label}</h1><p>{page === 'overview' ? 'Commit funding. Keep everyone in the loop.' : page === 'rounds' ? 'Pay a whole contributor round with one approval flow.' : page === 'ledger' ? 'Follow the funds, from treasury deposit to recipient.' : page === 'my-funds' ? 'Your funding, vesting progress, and unlocks across workspaces.' : page === 'verify' ? 'Check the payment against finalized Portaldot evidence.' : page === 'approvals' ? 'Review the exact terms before your treasury commits funds.' : page === 'treasury' ? 'A shared treasury, controlled by its signers.' : page === 'recipients' ? 'The people and teams your treasury has funded.' : 'Every contribution, with a clear funding commitment.'}</p></div><div className="heading-actions">{page === 'treasury' && treasury && <button className="btn btn-outline" onClick={() => needWallet('treasury')}><Plus size={15} />New treasury</button>}{!['my-funds', 'verify', 'ledger'].includes(page) && createButton}</div></div>}
+        {page !== 'award' && page !== 'round' && <div className="page-heading"><div><div className="eyebrow">{page === 'overview' ? 'YOUR FUNDING WORKSPACE' : 'WORKSPACE / ' + page.replace('-', ' ').toUpperCase()}</div><h1>{page === 'overview' ? 'Overview' : nav.find(n => n.key === page)?.label}</h1><p>{page === 'overview' ? 'Shared payments and contributor funding.' : page === 'rounds' ? 'Pay a whole contributor round with one approval flow.' : page === 'ledger' ? 'Follow the funds, from treasury deposit to recipient.' : page === 'my-funds' ? 'Your funding, vesting progress, and unlocks across workspaces.' : page === 'verify' ? 'Check the payment against finalized Portaldot evidence.' : page === 'approvals' ? 'Review the exact terms before your treasury commits funds.' : page === 'treasury' ? 'A shared treasury, controlled by its signers.' : page === 'recipients' ? 'The people and teams your treasury has funded.' : 'Create and manage individual contributor payments.'}</p></div><div className="heading-actions">{page === 'treasury' && treasury && <button className="btn btn-outline" onClick={() => needWallet('treasury')}><Plus size={15} />New treasury</button>}{!['my-funds', 'verify', 'ledger'].includes(page) && createButton}</div></div>}
 
         {page === 'overview' && <>
           <div className="stats-strip">
@@ -219,29 +264,29 @@ export default function App() {
             <div className="stat-item"><span>Recipients <Users size={14} /></span><strong>{recipients.length}<span className="stat-word"> wallets</span></strong><small>Funded directly on Portaldot</small></div>
           </div>
           <div className="overview-grid">
-            <section className="panel schedule-panel"><div className="panel-heading"><div><h2>Funding schedule</h2><p>Awarded funds and their release progress.</p></div><span className="subtle-label"><span className="connection-dot online" />{funded.length} funded</span></div>
+            <div className="overview-primary"><RoundList rounds={rounds} compact open={id => go('round', id)} />
+          <section className="panel"><div className="panel-heading"><div><h2>Recent awards</h2><p>Funding commitments, approvals, and recipients.</p></div><button className="btn btn-ghost btn-sm" onClick={() => go('awards')}>View all <ArrowUpRight size={14} /></button></div>{renderAwardTable({ compact: true })}</section>
+            {funded.length > 0 && <section className="panel schedule-panel"><div className="panel-heading"><div><h2>Funding schedule</h2><p>Awarded funds and their release progress.</p></div><span className="subtle-label"><span className="connection-dot online" />{funded.length} funded</span></div>
               {funded.length ? <div className="schedule-list">{funded.slice(0, 4).map(award => {
                 const remaining = vestedRemaining(BigInt(award.lockedRaw), BigInt(award.perBlockRaw), award.startBlock, network.finalizedBlock);
                 const percent = award.lockedRaw === '0' ? 100 : Number((BigInt(award.lockedRaw) - remaining) * 100n / BigInt(award.lockedRaw));
                 const parent = rounds.find(r => r.awards.some(a => a.id === award.id));
                 return <button className="schedule-row" key={award.id} onClick={() => go(parent ? 'round' : 'award', parent?.id || award.id)}><div className="schedule-row-heading"><span>{award.title}</span><Money raw={award.totalRaw} /></div><progress className="progress" value={percent} max={100} /><div className="schedule-row-caption"><span>{award.lockedRaw === '0' ? 'Paid immediately' : percent + '% of vested portion earned'}</span><span>{award.lockedRaw === '0' ? 'No vesting lock' : 'Through #' + award.endBlock.toLocaleString()}</span></div></button>;
-              })}</div> : <div className="schedule-empty"><div className="release-illustration" aria-hidden="true"><span /><span /><span /><span /><span /><span /><i /></div><h3>A clear path from award to unlock.</h3><p>Your funded awards will appear here, with progress<br className="desktop-break" /> read from finalized Portaldot blocks.</p><button className="text-button" onClick={() => setModal('guide')}>See how funding works <ArrowRight size={14} /></button></div>}
+              })}</div> : <div className="schedule-empty"><div className="release-illustration" aria-hidden="true"><span /><span /><span /><span /><span /><span /><i /></div><h3>No funded payments yet</h3><p>Your funded awards will appear here, with progress<br className="desktop-break" /> read from finalized Portaldot blocks.</p><button className="text-button" onClick={() => setModal('guide')}>See how funding works <ArrowRight size={14} /></button></div>}
               <div className="panel-footnote"><ShieldCheck size={13} />Funded vesting is enforced by the chain.</div>
-            </section>
-            <section className="panel treasury-summary"><div className="panel-heading"><h2>Your treasury</h2><Wallet size={16} className="muted" /></div>
+            </section>}
+            </div><section className="panel treasury-summary"><div className="panel-heading"><h2>Your treasury</h2><Wallet size={16} className="muted" /></div>
               {treasury ? <><div className="treasury-name"><span className="treasury-monogram">{treasury.name.slice(0, 2).toUpperCase()}</span><div><strong>{treasury.name}</strong><small>{treasury.threshold} of {treasury.signatories.length} approvals required</small></div></div><div className="address-box"><code>{shortAddress(treasury.address)}</code><button className="icon-button" aria-label="Copy treasury address" onClick={() => void copy(treasury.address)}><Copy size={13} /></button></div><dl className="compact-details"><div><dt>Balance</dt><dd>{wallet ? <Money raw={wallet.freeRaw} /> : '—'}</dd></div><div><dt>Approval policy</dt><dd>{treasury.threshold} / {treasury.signatories.length} signers</dd></div><div><dt>Network</dt><dd>Portaldot V3</dd></div></dl><button className="btn btn-outline full-width" onClick={() => needWallet('fund')}><Plus size={14} />Add funds</button></> :
-                <div className="treasury-onboarding"><div className="treasury-outline"><Wallet size={27} strokeWidth={1.1} /></div><h3>Make it a shared commitment.</h3><p>Choose your signers and approval threshold. Your team stays in control of the funds.</p><button className="btn btn-outline full-width" onClick={() => needWallet('treasury')}>Create treasury <ArrowRight size={14} /></button></div>}
+                <div className="treasury-onboarding"><div className="treasury-outline"><Wallet size={27} strokeWidth={1.1} /></div><h3>Create your first treasury</h3><p>Choose your signers and approval threshold. Your team stays in control of the funds.</p><button className="btn btn-outline full-width" onClick={() => needWallet('treasury')}>Create treasury <ArrowRight size={14} /></button></div>}
             </section>
           </div>
-          <RoundList rounds={rounds} compact open={id => go('round', id)} />
-          <section className="panel"><div className="panel-heading"><div><h2>Recent awards</h2><p>Funding commitments, approvals, and recipients.</p></div><button className="btn btn-ghost btn-sm" onClick={() => go('awards')}>View all <ArrowUpRight size={14} /></button></div><AwardTable compact /></section>
         </>}
 
-        {(page === 'awards' || page === 'approvals') && <section className="panel"><div className="panel-heading table-toolbar"><div className="table-tabs"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>All awards <span>{page === 'approvals' ? pending.length : awards.length}</span></button>{page === 'awards' && <><button className={filter === 'funded' ? 'active' : ''} onClick={() => setFilter('funded')}>Funded</button><button className={filter === 'awaiting_approval' ? 'active' : ''} onClick={() => setFilter('awaiting_approval')}>Needs approval</button></>}</div><label className="search-field"><Search size={15} /><input aria-label="Search awards" placeholder="Search awards…" value={search} onChange={e => setSearch(e.target.value)} /><kbd>/</kbd></label></div><AwardTable /></section>}
+        {(page === 'awards' || page === 'approvals') && <section className="panel"><div className="panel-heading table-toolbar"><div className="table-tabs"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>All awards <span>{page === 'approvals' ? pending.length : awards.length}</span></button>{page === 'awards' && <><button className={filter === 'funded' ? 'active' : ''} onClick={() => setFilter('funded')}>Funded</button><button className={filter === 'awaiting_approval' ? 'active' : ''} onClick={() => setFilter('awaiting_approval')}>Needs approval</button></>}</div><label className="search-field"><Search size={15} /><input aria-label="Search awards" placeholder="Search awards…" value={search} onChange={e => setSearch(e.target.value)} /><kbd>/</kbd></label></div>{renderAwardTable()}</section>}
 
-        {page === 'recipients' && <section className="panel"><div className="panel-heading"><h2>Funded recipients <span className="count-label">{recipients.length}</span></h2></div>{recipients.length ? <div className="recipient-list">{recipients.map((recipient, i) => <div className="recipient-row" key={recipient}><span className="person-avatar">{String(i + 1).padStart(2, '0')}</span><div><strong>{shortAddress(recipient)}</strong><small>{funded.filter(a => a.recipient === recipient).length} funded awards</small></div><Money raw={funded.filter(a => a.recipient === recipient).reduce((sum, a) => sum + BigInt(a.totalRaw), 0n).toString()} /><button className="icon-button" aria-label="Copy recipient address" onClick={() => void copy(recipient)}><Copy size={14} /></button></div>)}</div> : <Empty icon={Users} title="Good work starts with people" text="Recipients appear here when an award has been funded on-chain." />}</section>}
+        {page === 'recipients' && <section className="panel"><div className="panel-heading"><h2>Funded recipients <span className="count-label">{recipients.length}</span></h2></div>{recipients.length ? <div className="recipient-list">{recipients.map((recipient, i) => <div className="recipient-row" key={recipient}><span className="person-avatar">{String(i + 1).padStart(2, '0')}</span><div><strong>{shortAddress(recipient)}</strong><small>{funded.filter(a => a.recipient === recipient).length} funded awards</small></div><Money raw={funded.filter(a => a.recipient === recipient).reduce((sum, a) => sum + BigInt(a.totalRaw), 0n).toString()} /><button className="icon-button" aria-label="Copy recipient address" onClick={() => void copy(recipient)}><Copy size={14} /></button></div>)}</div> : <Empty icon={Users} title="No funded recipients" text="Recipients appear here when an award has been funded on-chain." />}</section>}
 
-        {page === 'treasury' && (treasury ? <div className="treasury-grid"><section className="panel"><div className="panel-heading"><h2>{treasury.name}</h2><ShieldCheck size={17} /></div><div className="treasury-balance"><span className="muted">Available to award</span><Money big raw={wallet?.spendableRaw || '0'} /><button className="btn btn-primary" onClick={() => needWallet('fund')}><Plus size={15} />Add funds</button></div><div className="full-address"><span>Treasury address</span><code>{treasury.address}</code><button className="icon-button" aria-label="Copy full treasury address" onClick={() => void copy(treasury.address)}><Copy size={14} /></button></div><dl className="compact-details padded-details"><div><dt>Approval threshold</dt><dd>{treasury.threshold} of {treasury.signatories.length} signers</dd></div><div><dt>Minimum account balance</dt><dd><Money raw={network.existentialDepositRaw} /></dd></div><div><dt>Native token</dt><dd>tPOT · 14 decimals</dd></div></dl></section><section className="panel"><div className="panel-heading"><h2>Treasury signers</h2><span className="count-label">{treasury.signatories.length}</span></div><div className="signer-list">{treasury.signatories.map((signer, i) => <div className="signer-row" key={signer}><span className="person-avatar">{String(i + 1).padStart(2, '0')}</span><div><strong>{signer === address ? 'Your wallet' : 'Signer ' + (i + 1)}</strong><small>{shortAddress(signer)}</small></div><button className="icon-button" aria-label="Copy signer address" onClick={() => void copy(signer)}><Copy size={14} /></button></div>)}</div><div className="info-block"><ShieldCheck size={16} /><p>The signer set determines this treasury address. A different signer set creates a different treasury.</p></div></section></div> : <section className="panel"><Empty icon={Wallet} title="Give your team a treasury" text="Set an approval policy and fund a shared native account." action={<button className="btn btn-primary" onClick={() => needWallet('treasury')}><Plus size={15} />Create treasury</button>} /></section>)}
+        {page === 'treasury' && (treasury ? <div className="treasury-grid"><section className="panel"><div className="panel-heading"><h2>{treasury.name}</h2><ShieldCheck size={17} /></div><div className="treasury-balance"><span className="muted">Available to award</span><Money big raw={wallet?.spendableRaw || '0'} /><button className="btn btn-primary" onClick={() => needWallet('fund')}><Plus size={15} />Add funds</button></div><div className="full-address"><span>Treasury address</span><code>{treasury.address}</code><button className="icon-button" aria-label="Copy full treasury address" onClick={() => void copy(treasury.address)}><Copy size={14} /></button></div><dl className="compact-details padded-details"><div><dt>Approval threshold</dt><dd>{treasury.threshold} of {treasury.signatories.length} signers</dd></div><div><dt>Minimum account balance</dt><dd><Money raw={network.existentialDepositRaw} /></dd></div><div><dt>Native token</dt><dd>tPOT · 14 decimals</dd></div></dl></section><section className="panel"><div className="panel-heading"><h2>Treasury signers</h2><span className="count-label">{treasury.signatories.length}</span></div><div className="signer-list">{treasury.signatories.map((signer, i) => <div className="signer-row" key={signer}><span className="person-avatar">{String(i + 1).padStart(2, '0')}</span><div><strong>{signer === address ? 'Your wallet' : 'Signer ' + (i + 1)}</strong><small>{shortAddress(signer)}</small></div><button className="icon-button" aria-label="Copy signer address" onClick={() => void copy(signer)}><Copy size={14} /></button></div>)}</div><div className="info-block"><ShieldCheck size={16} /><p>The signer set determines this treasury address. A different signer set creates a different treasury.</p></div></section></div> : <section className="panel"><Empty icon={Wallet} title="Create a treasury" text="Set an approval policy and fund a shared native account." action={<button className="btn btn-primary" onClick={() => needWallet('treasury')}><Plus size={15} />Create treasury</button>} /></section>)}
 
         {page === 'award' && (detail?.award.id === awardId ? <>
           <button className="back-link" onClick={() => go('awards')}><ChevronLeft size={14} />All awards</button>
@@ -277,7 +322,7 @@ export default function App() {
         {page === 'my-funds' && <RecipientPage address={address} block={network.finalizedBlock} networkReady={networkReady} onWallet={openWallet} open={(id, round) => go(round ? 'round' : 'award', id)} onReview={value => { setReview(value); setModal('review'); }} />}
         {page === 'verify' && <VerifyPage />}
         <footer className="workspace-footer"><span><span className={'connection-dot ' + (networkReady ? 'online' : '')} />{networkReady ? 'Connected to Portaldot V3' : 'Waiting for network'}</span><span>{network.finalizedBlock > 0 ? 'Finalized #' + network.finalizedBlock.toLocaleString() : 'Checking finalized head'}<span className="footer-divider">/</span>Funds stay on-chain</span></footer>
-      </main>
+      </Suspense></main>
     </div>
 
     {error && !modal && <div className="toast toast-end toast-bottom"><div className="alert error-alert" role="alert"><AlertCircle size={17} /><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={15} /></button></div></div>}
@@ -288,26 +333,27 @@ export default function App() {
       {busy && <div className="wallet-loading"><LoaderCircle size={18} className="spin" />{availableAccounts.length ? 'Confirm the sign-in message in your wallet…' : selectedWallet ? 'Authorize ' + selectedWallet + ' to share your native accounts…' : 'Looking for installed native wallets…'}</div>}
       {!availableAccounts.length && <div className="wallet-options">{availableProviders.map(provider => <button key={provider.id} disabled={busy} className="wallet-option" onClick={() => void act(async () => {
         setSelectedWallet(provider.name);
+        const { accounts } = await import('./wallet');
         const found = await accounts(provider.id);
         setAvailableAccounts(found);
       })}><span className="wallet-option-icon"><Wallet size={20} /></span><span><strong>{provider.name}</strong><small>Use native accounts on Portaldot testnet</small></span><ChevronRight size={16} /></button>)}</div>}
-      <div className="wallet-options">{availableAccounts.map(account => <button key={account.meta.source + account.address} disabled={busy} className="wallet-option" onClick={() => void act(async () => { await login(account); setModal(null); await refresh(); setToast('Wallet connected'); })}><span className="wallet-option-icon"><Wallet size={20} /></span><span><strong>{account.meta.name || 'Native wallet'}</strong><small>{shortAddress(account.address)} · {providerName(account.meta.source)}</small></span><ChevronRight size={16} /></button>)}</div>
+      <div className="wallet-options">{availableAccounts.map(account => <button key={account.meta.source + account.address} disabled={busy} className="wallet-option" onClick={() => void act(async () => { const { login } = await import('./wallet'); await login(account); setModal(null); await refresh(true); setToast('Wallet connected'); })}><span className="wallet-option-icon"><Wallet size={20} /></span><span><strong>{account.meta.name || 'Native wallet'}</strong><small>{shortAddress(account.address)} · {availableProviders.find(p => p.id === account.meta.source)?.name || account.meta.source}</small></span><ChevronRight size={16} /></button>)}</div>
       {availableAccounts.some(account => account.meta.genesisHash && account.meta.genesisHash !== NETWORK.genesis) && <div className="wallet-network-help"><p>Your wallet associates an account with another network. You can sign in with the same native account; funding actions will explicitly request Portaldot V3 testnet.</p></div>}
       {!busy && !availableProviders.length && <div className="wallet-guidance"><h3>Connect a Portaldot native account</h3><p>No compatible native wallet was detected. Portaldot’s website links its browser extension below. After installing or enabling a wallet, reload this page.</p><div><a className="btn btn-outline btn-sm" href="https://chromewebstore.google.com/detail/portaldot-extension/cpdecangbhmfijmlmjglfcocfpaojceo" target="_blank" rel="noreferrer">Portaldot Wallet <ArrowUpRight size={13} /></a><a className="btn btn-ghost btn-sm" href="https://www.portaldot.world/" target="_blank" rel="noreferrer">Official website <ArrowUpRight size={13} /></a></div><button className="btn btn-ghost btn-sm" onClick={openWallet}><RefreshCw size={13} />Check installed wallets</button></div>}
       {!busy && availableProviders.length > 0 && <div className="wallet-network-help"><p>Transactions use Portaldot testnet and tPOT. Your wallet supplies the signing account; PortaFlow verifies the chain before signing.</p><a className="text-button" href="https://chromewebstore.google.com/detail/portaldot-extension/cpdecangbhmfijmlmjglfcocfpaojceo" target="_blank" rel="noreferrer">Get Portaldot Wallet <ArrowUpRight size={12} /></a>{availableAccounts.length > 0 && <button className="text-button" disabled={busy} onClick={openWallet}>Choose another wallet</button>}</div>}
-      {address && <div className="wallet-current"><span>Signed in as <code>{shortAddress(address)}</code></span><button className="text-button" onClick={() => void act(async () => { await request('/auth/logout', {}); setModal(null); await refresh(); })}><LogOut size={13} />Disconnect</button></div>}
+      {address && <div className="wallet-current"><span>Signed in as <code>{shortAddress(address)}</code></span><button className="text-button" onClick={() => void act(async () => { await request('/auth/logout', {}); setModal(null); await refresh(true); })}><LogOut size={13} />Disconnect</button></div>}
     </Modal>}
-    {modal === 'treasury' && <TreasuryForm address={address || ''} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<Treasury>('/treasuries', values); setTreasuryId(created.id); localStorage.setItem('portaflow-treasury', created.id); setModal(null); await refresh(); go('treasury'); setToast('Treasury workspace created'); })} />}
-    {modal === 'award' && treasury && <AwardForm treasury={treasury} network={network} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<Award>('/awards', values); setModal(null); await refresh(); go('award', created.id); setToast('Award ready for treasury approval'); })} />}
-    {modal === 'round' && treasury && <Modal title="Create a payout round" eyebrow={treasury.name.toUpperCase()} wide close={() => setModal(null)} busy={busy}><RoundForm treasury={treasury} network={network} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<PayoutRound>('/rounds', values); setModal(null); await refresh(); go('round', created.id); setToast('Payout round ready for shared approval'); })} /></Modal>}
-    {modal === 'import' && treasury && <ImportForm treasury={treasury} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const result = await request<{ awards: Award[] }>('/awards/import', values); setModal(null); await refresh(); go('awards'); setToast(result.awards.length + ' award drafts imported'); })} />}
+    {modal === 'treasury' && <TreasuryForm address={address || ''} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<Treasury>('/treasuries', values); setTreasuryId(created.id); localStorage.setItem('portaflow-treasury', created.id); setModal(null); await refresh(true); go('treasury'); setToast('Treasury workspace created'); })} />}
+    {modal === 'award' && treasury && <AwardForm treasury={treasury} network={network} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<Award>('/awards', values); setModal(null); await refresh(true); go('award', created.id); setToast('Award ready for treasury approval'); })} />}
+    {modal === 'round' && treasury && <Modal title="Create a payout round" eyebrow={treasury.name.toUpperCase()} wide close={() => setModal(null)} busy={busy}><RoundForm treasury={treasury} network={network} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<PayoutRound>('/rounds', values); setModal(null); await refresh(true); go('round', created.id); setToast('Payout round ready for shared approval'); })} /></Modal>}
+    {modal === 'import' && treasury && <ImportForm treasury={treasury} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const result = await request<{ awards: Award[] }>('/awards/import', values); setModal(null); await refresh(true); go('awards'); setToast(result.awards.length + ' award drafts imported'); })} />}
     {modal === 'fund' && treasury && <FundingForm treasury={treasury} busy={busy} close={() => setModal(null)} submit={amount => void act(async () => { const plan = await request<TransactionPlan>('/treasuries/' + treasury.id + '/funding-plan', { amount }); setReview({ plan, treasury, amountRaw: parseAmount(amount).toString() }); setModal('review'); })} />}
     {modal === 'review' && review && <Modal title="Review transaction" eyebrow={review.plan.kind.toUpperCase()} busy={busy} wide={Boolean(review.round)} close={() => setModal(null)}><div className="review-target"><ShieldCheck size={23} /><div><strong>{review.round?.title || review.award?.title || (review.plan.kind === 'treasury funding' ? 'Fund ' + review.treasury?.name : 'Unlock vested funds')}</strong><small>{review.plan.kind === 'approval' ? 'Records your approval. A later signer completes funding.' : review.plan.kind === 'funding' ? 'This signature executes the approved payments atomically.' : 'Signed in your native wallet.'}</small></div></div>
       {review.round && <><div className="op-round-totals"><div><span>Total · {review.round.awards.length} payments</span><Money raw={review.round.totalRaw} /></div><div><span>Immediate</span><Money raw={review.round.upfrontRaw} /></div><div><span>Vested</span><Money raw={review.round.lockedRaw} /></div></div><div className="op-review-payments">{review.round.awards.map(a => <div key={a.id}><span><strong>{a.title}</strong><code>{a.recipient}</code><small>{a.lockedRaw === '0' ? '100% immediate' : formatAmount(a.upfrontRaw) + ' immediate · ' + formatAmount(a.lockedRaw) + ' vested · #' + a.startBlock + ' → #' + a.endBlock}</small></span><Money raw={a.totalRaw} /></div>)}</div><p className="fine-print">Terms hash</p><code className="op-hash">{review.round.termsHash}</code></>}
       <dl className="review-details">{review.award && review.plan.kind !== 'unlock' && <><div><dt>Total award</dt><dd><Money raw={review.award.totalRaw} /></dd></div><div><dt>Immediate / vested</dt><dd>{formatAmount(review.award.upfrontRaw)} / {formatAmount(review.award.lockedRaw)} tPOT</dd></div><div><dt>Start / end block</dt><dd>#{review.award.startBlock} / #{review.award.endBlock}</dd></div></>}{review.recipient && <div><dt>Recipient</dt><dd title={review.recipient}>{shortAddress(review.recipient)}</dd></div>}{review.plan.kind === 'unlock' && <div><dt>Action</dt><dd>Update recipient’s vesting lock</dd></div>}{review.amountRaw && <div><dt>Transfer amount</dt><dd><Money raw={review.amountRaw} /></dd></div>}<div><dt>Signing wallet / fee payer</dt><dd>{shortAddress(review.plan.signer)}</dd></div><div><dt>Estimated network fee</dt><dd><Money raw={review.plan.feeRaw} /></dd></div>{BigInt(review.plan.depositRaw) > 0n && <div><dt>Refundable approval deposit</dt><dd><Money raw={review.plan.depositRaw} /></dd></div>}<div><dt>Network</dt><dd>Portaldot V3 Testnet</dd></div></dl>
       <p className="fine-print">The browser verifies the encoded transaction against these terms before opening your wallet. Your wallet may first ask to add Portaldot’s network details. Network fees are estimates; the wallet shows the final signing request.</p><div className="modal-footer"><button className="btn btn-outline" disabled={busy} onClick={() => setModal(null)}>Back</button><button className="btn btn-primary" disabled={busy} onClick={submitReview}>{busy ? <LoaderCircle size={15} className="spin" /> : <Wallet size={15} />}{busy ? progress || 'Preparing wallet…' : 'Confirm in wallet'}</button></div>
     </Modal>}
-    {modal === 'guide' && <Modal title="A clear funding commitment." eyebrow="HOW PORTAFLOW WORKS" close={() => setModal(null)}><div className="guide-steps">{[
+    {modal === 'guide' && <Modal title="How PortaFlow works" eyebrow="HOW PORTAFLOW WORKS" close={() => setModal(null)}><div className="guide-steps">{[
       ['01', 'Set up a shared treasury', 'Choose native wallet signers and an approval threshold. Fund its address with testnet tPOT.'],
       ['02', 'Agree on an award', 'Specify the recipient, immediate payment, and block-based vesting schedule.'],
       ['03', 'Approve the exact terms', 'Treasury signers authorize an atomic payment and funded native vesting transfer.'],
@@ -361,7 +407,7 @@ function ImportForm({ treasury, busy, close, submit }: { treasury: Treasury; bus
     if (!file) return;
     try {
       if (file.size > 40_000) throw new Error('Keep the CSV under 40 KB and 25 awards.');
-      const source = await file.text(); const parsed = readAwardCsv(source);
+      const source = await file.text(); const parsed = readAwardCsv(source); const { normalize } = await import('./wallet');
       for (let i = 0; i < parsed.length; i++) {
         try { normalize(parsed[i].recipient); } catch { throw new Error('Row ' + (i + 2) + ': enter a valid native recipient address.'); }
       }

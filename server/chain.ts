@@ -27,6 +27,7 @@ export class Chain {
   private busy = false;
   private scanning?: Promise<void>;
   private connecting?: Promise<void>;
+  private walletReads = new Map<string, Promise<WalletState>>();
   private sponsor?: KeyringPair;
   private sponsorBusy = new Set<string>();
   private sponsoredAt = new Map<string, number>();
@@ -109,6 +110,16 @@ export class Chain {
   async wallet(address: string): Promise<WalletState> {
     const api = this.requireApi();
     const hash = await api.rpc.chain.getFinalizedHead();
+    const key = hash.toHex() + ':' + address;
+    const cached = this.walletReads.get(key);
+    if (cached) return cached;
+    const read = this.readWallet(address, hash).catch(error => { this.walletReads.delete(key); throw error; });
+    if (this.walletReads.size >= 128) this.walletReads.delete(this.walletReads.keys().next().value!);
+    this.walletReads.set(key, read);
+    return read;
+  }
+  private async readWallet(address: string, hash: any): Promise<WalletState> {
+    const api = this.requireApi();
     const at = await api.at(hash);
     const [account, stored, locks, header]: any[] = await Promise.all([
       at.query.system.account(address), at.query.vesting.vesting(address),
