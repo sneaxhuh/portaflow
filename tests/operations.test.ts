@@ -7,7 +7,7 @@ import fallbackMetadata from '@polkadot/types-support/metadata/static-substrate'
 import { blake2AsHex, encodeAddress } from '@polkadot/util-crypto';
 import type { ApiPromise } from '@polkadot/api';
 import { Store } from '../server/store';
-import { Chain, fundingSucceeded } from '../server/chain';
+import { Chain, fundingSucceeded, hasTrackedActivity } from '../server/chain';
 import { createApp } from '../server/app';
 import { sessionHash, treasuryIdentity } from '../server/identity';
 import { verifyReceipt } from '../server/verify';
@@ -69,6 +69,19 @@ test('outer extrinsic success alone never counts as funded', () => {
   assert.equal(fundingSucceeded(false, ['BatchCompleted', 'ExtrinsicSuccess']), false);
   assert.equal(fundingSucceeded(true, ['BatchInterrupted', 'ExtrinsicSuccess']), false);
   assert.equal(fundingSucceeded(true, ['BatchCompleted', 'ExtrinsicSuccess']), true);
+});
+
+test('history skips unrelated chain activity but keeps treasury movements, known multisigs and recipient unlocks', () => {
+  const treasuries = new Set([treasury.address]), calls = new Set(['known-call']), recipients = new Set([native(3)]);
+  const tracked = (section: string, method: string, data: any[]) => hasTrackedActivity([{ event: { section, method, data } }], treasuries, calls, recipients);
+  assert.equal(tracked('balances', 'Transfer', [native(4), native(5)]), false);
+  assert.equal(tracked('balances', 'Transfer', [native(4), treasury.address]), true);
+  assert.equal(tracked('balances', 'Transfer', [treasury.address, native(4)]), true);
+  assert.equal(tracked('multisig', 'NewMultisig', [null, null, { toHex: () => 'known-call' }]), true);
+  assert.equal(tracked('multisig', 'MultisigExecuted', [null, null, null, { toHex: () => 'known-call' }]), true);
+  assert.equal(tracked('multisig', 'MultisigApproval', [null, null, null, { toHex: () => 'other-call' }]), false);
+  assert.equal(tracked('vesting', 'VestingCompleted', [native(3)]), true);
+  assert.equal(tracked('vesting', 'VestingUpdated', [native(5)]), false);
 });
 
 test('immediate CSV rows, small amounts, and schedule rounding are exact', () => {

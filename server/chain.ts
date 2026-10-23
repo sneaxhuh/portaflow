@@ -20,6 +20,19 @@ export function fundingSucceeded(innerOk: boolean, methods: string[]) {
   return innerOk && methods.includes('BatchCompleted') && !methods.includes('BatchInterrupted') && !methods.includes('ExtrinsicFailed');
 }
 
+export function hasTrackedActivity(records: any, treasuries: Set<string>, calls: Set<string>, recipients: Set<string>): boolean {
+  return records.some(({ event }: any) => {
+    if (event.section === 'balances' && event.method === 'Transfer') {
+      return treasuries.has(normalizeAddress(event.data[0].toString())) || treasuries.has(normalizeAddress(event.data[1].toString()));
+    }
+    if (event.section === 'multisig' && ['NewMultisig', 'MultisigApproval', 'MultisigExecuted', 'MultisigCancelled'].includes(event.method)) {
+      return calls.has(event.data[event.method === 'NewMultisig' ? 2 : 3].toHex());
+    }
+    return event.section === 'vesting' && ['VestingUpdated', 'VestingCompleted'].includes(event.method)
+      && recipients.has(normalizeAddress(event.data[0].toString()));
+  });
+}
+
 export class Chain {
   api?: ApiPromise;
   state = initialNetwork();
@@ -313,8 +326,14 @@ export class Chain {
     const savedCursor = await this.store.getMeta(cursorKey);
     // Only prepared calls can have matching on-chain activity. Their creation
     // block precedes signing, so older history cannot contain an award receipt.
-    const preparedAwards = [...await this.store.list<Award>('awards'), ...await this.store.list<PayoutRound>('rounds')].filter(award => award.callHash);
+    const proposals = [...await this.store.list<Award>('awards'), ...await this.store.list<PayoutRound>('rounds')];
+    const preparedAwards = proposals.filter(award => award.callHash);
     const treasuries = await this.store.list<Treasury>('treasuries');
+    const trackedTreasuries = new Set(treasuries.map(t => t.address));
+    const trackedCalls = new Set(preparedAwards.map(p => p.callHash!));
+    // Include pending recipients: a round may fund and unlock within this scan.
+    const trackedRecipients = new Set(proposals
+      .flatMap(p => 'awards' in p ? p.awards.map(a => a.recipient) : [p.recipient]));
     const startingBlocks = [...preparedAwards.map(a => a.createdBlock), ...treasuries.map(t => t.createdBlock).filter((b): b is number => b !== undefined)];
     const earliestRelevantBlock = startingBlocks.length ? Math.min(...startingBlocks, this.state.finalizedBlock) : this.state.finalizedBlock;
     // Never jump a saved cursor to the current head: ordinary treasury deposits
@@ -338,8 +357,7 @@ export class Chain {
       for (const { blockNumber, hash, records } of blocks) {
         // Most blocks have no award activity. Avoid downloading their extrinsics
         // or constructing a historical API just to advance the receipt cursor.
-        const relevant = records.some(({ event }: any) => event.section === 'multisig' || event.section === 'balances' && event.method === 'Transfer'
-          || event.section === 'vesting' && ['VestingUpdated', 'VestingCompleted'].includes(event.method));
+        const relevant = hasTrackedActivity(records, trackedTreasuries, trackedCalls, trackedRecipients);
         if (relevant) await this.indexBlock(hash.toHex(), blockNumber, records);
         cursor = blockNumber;
       }
