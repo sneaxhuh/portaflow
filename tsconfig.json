@@ -4,7 +4,8 @@
     "module": "ESNext", "moduleResolution": "Bundler", "jsx": "react-jsx",
     "strict": true, "skipLibCheck": true, "noEmit": true,
     "allowImportingTsExtensions": true, "resolveJsonModule": true,
-    "esModuleInterop": true, "types": ["node"]
+    "esModuleInterop": true, "types": ["node"],
+    "baseUrl": ".", "paths": { "@/*": ["./web/*"] }
   },
   "include": ["web", "server", "shared", "api", "scripts", "tests", "vite.config.ts"]
 }
