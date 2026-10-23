@@ -434,7 +434,9 @@ export class Chain {
     const sponsorWallet = await this.wallet(this.sponsor.address);
     if (BigInt(sponsorWallet.spendableRaw) < cap || await this.store.sponsoredToday() >= budget) return;
     this.state.sponsorEnabled = true;
-    const recipients = [...new Set((await this.store.list<Award>('awards')).filter(a => a.status === 'funded').map(a => a.recipient))];
+    const payments = [...(await this.store.list<Award>('awards')).filter(a => a.status === 'funded'),
+      ...(await this.store.list<PayoutRound>('rounds')).filter(r => r.status === 'funded').flatMap(r => r.awards)];
+    const recipients = [...new Set(payments.filter(a => BigInt(a.lockedRaw) > 0n).map(a => a.recipient))];
     for (const recipient of recipients) {
       if (this.sponsorBusy.has(recipient) || Date.now() - (this.sponsoredAt.get(recipient) || 0) < 60_000) continue;
       const wallet = await this.wallet(recipient);

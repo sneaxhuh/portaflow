@@ -302,6 +302,22 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
       fundedRaw: proposals.filter(p => p.status === 'funded').reduce((s, p) => s + BigInt(p.totalRaw), 0n).toString(),
       signerFeesRaw: fees.toString(), pendingDeposits, historyAvailable: chain.state.lastSyncedBlock >= chain.state.finalizedBlock } satisfies TreasuryLedger;
   });
+  app.get('/api/recipient/:address', async request => {
+    const recipient = normalizeAddress((request.params as any).address);
+    const treasuries = await store.list<Treasury>('treasuries');
+    const awards: (Award & { roundId?: string; treasuryName: string })[] = [
+      ...(await store.list<Award>('awards')).filter(a => a.recipient === recipient && a.status === 'funded')
+        .map(a => ({ ...a, treasuryName: treasuries.find(t => t.id === a.treasuryId)?.name || 'Treasury' })),
+      ...(await store.list<PayoutRound>('rounds')).filter(r => r.status === 'funded').flatMap(r => r.awards.filter(a => a.recipient === recipient)
+        .map(a => ({ ...a, status: r.status, fundingTx: r.fundingTx, fundingBlock: r.fundingBlock, roundId: r.id,
+          treasuryName: treasuries.find(t => t.id === r.treasuryId)?.name || 'Treasury' }))),
+    ];
+    return { address: recipient, wallet: await chain.wallet(recipient), awards,
+      totalFundedRaw: awards.reduce((s, a) => s + BigInt(a.totalRaw), 0n).toString(),
+      totalImmediateRaw: awards.reduce((s, a) => s + BigInt(a.upfrontRaw), 0n).toString(),
+      totalVestedRaw: awards.reduce((s, a) => s + BigInt(a.lockedRaw), 0n).toString() };
+  });
+  app.post('/api/recipient/:address/unlock-plan', async request => chain.unlockPlan(normalizeAddress((request.params as any).address), auth(request)));
   if (options.serverless && options.connect !== false) {
     app.addHook('preHandler', async request => {
       const path = request.url.split('?')[0];
