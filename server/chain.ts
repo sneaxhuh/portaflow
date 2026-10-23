@@ -287,11 +287,14 @@ export class Chain {
     // Only prepared calls can have matching on-chain activity. Their creation
     // block precedes signing, so older history cannot contain an award receipt.
     const preparedAwards = [...await this.store.list<Award>('awards'), ...await this.store.list<PayoutRound>('rounds')].filter(award => award.callHash);
-    const earliestRelevantBlock = preparedAwards.length
-      ? Math.min(...preparedAwards.map(award => award.createdBlock))
-      : this.state.finalizedBlock;
-    let cursor = Math.max(Number(savedCursor ?? earliestRelevantBlock), Math.min(earliestRelevantBlock, this.state.finalizedBlock));
+    const treasuries = await this.store.list<Treasury>('treasuries');
+    const startingBlocks = [...preparedAwards.map(a => a.createdBlock), ...treasuries.map(t => t.createdBlock).filter((b): b is number => b !== undefined)];
+    const earliestRelevantBlock = startingBlocks.length ? Math.min(...startingBlocks, this.state.finalizedBlock) : this.state.finalizedBlock;
+    // Never jump a saved cursor to the current head: ordinary treasury deposits
+    // must be indexed even when there are no prepared award proposals.
+    let cursor = Number(savedCursor ?? earliestRelevantBlock);
     this.state.lastSyncedBlock = cursor;
+    if (await this.store.getMeta('ledger:from') === undefined) await this.store.setMeta('ledger:from', String(cursor + 1));
     const end = Math.min(this.state.finalizedBlock, cursor + (this.background ? 120 : 24));
     // Fetch a small window concurrently, but apply receipts and persist the
     // cursor in block order. A failed request never skips an unprocessed block.
@@ -306,7 +309,7 @@ export class Chain {
       if (!await this.store.acquireLease('chain:' + NETWORK.genesis, owner, 120_000)) return;
       // Most blocks have no award activity. Avoid downloading their extrinsics
       // or constructing a historical API just to advance the receipt cursor.
-      const relevant = records.some(({ event }: any) => event.section === 'multisig'
+      const relevant = records.some(({ event }: any) => event.section === 'multisig' || event.section === 'balances' && event.method === 'Transfer'
         || event.section === 'vesting' && ['VestingUpdated', 'VestingCompleted'].includes(event.method));
       if (!relevant) {
         cursor = blockNumber;
@@ -340,6 +343,17 @@ export class Chain {
           timestamp: new Date(Number(timestamp.toString())).toISOString(),
           events: events.map(event => ({ section: event.section, method: event.method, data: event.data.toJSON() })) };
         for (const event of events) {
+          if (event.section === 'balances' && event.method === 'Transfer') {
+            const from = normalizeAddress(event.data[0].toString()), to = normalizeAddress(event.data[1].toString());
+            const eventIndex = records.findIndex((r: any) => r.event === event);
+            for (const treasury of treasuries) {
+              if (from !== treasury.address && to !== treasury.address) continue;
+              await this.store.saveLedger({ id: `${blockHash}:${eventIndex}:${treasury.id}`, treasuryId: treasury.id,
+                txHash: base.txHash, blockHash, blockNumber, extrinsicIndex: index, eventIndex, timestamp: base.timestamp,
+                direction: to === treasury.address ? 'incoming' : 'outgoing', counterparty: to === treasury.address ? from : to,
+                amountRaw: event.data[2].toString() });
+            }
+          }
           if (event.section === 'multisig') {
             const isNew = event.method === 'NewMultisig';
             if (!['NewMultisig', 'MultisigApproval', 'MultisigExecuted', 'MultisigCancelled'].includes(event.method)) continue;

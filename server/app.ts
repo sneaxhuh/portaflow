@@ -283,6 +283,25 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     return { application: 'PortaFlow', version: 2, network: NETWORK, round,
       treasury: await getTreasury(round.treasuryId), transactions: await store.receipts(round.id) };
   });
+  app.get('/api/treasuries/:id/ledger', async request => {
+    const treasury = await getTreasury(id(request));
+    const proposals = [...(await store.list<Award>('awards')).filter(a => a.treasuryId === treasury.id),
+      ...(await store.list<PayoutRound>('rounds')).filter(r => r.treasuryId === treasury.id)];
+    const receipts = (await Promise.all(proposals.map(p => store.receipts(p.id)))).flat();
+    const fees = [...new Map(receipts.map(r => [r.txHash, r])).values()].reduce((sum, r) => sum + BigInt(r.feeRaw), 0n);
+    const pendingDeposits: TreasuryLedger['pendingDeposits'] = [];
+    for (const proposal of proposals.filter(p => p.callHash && ['draft', 'awaiting_approval'].includes(p.status))) {
+      const pending = await chain.pending(treasury, proposal);
+      if (pending) pendingDeposits.push({ proposalId: proposal.id, title: proposal.title,
+        depositor: pending.depositor, amountRaw: pending.depositRaw });
+    }
+    return { wallet: await chain.wallet(treasury.address), entries: await store.ledger(treasury.id),
+      coverageFromBlock: Number(await store.getMeta('ledger:from') || chain.state.finalizedBlock), syncedToBlock: chain.state.lastSyncedBlock,
+      pendingRaw: proposals.filter(p => p.status === 'awaiting_approval').reduce((s, p) => s + BigInt(p.totalRaw), 0n).toString(),
+      draftsRaw: proposals.filter(p => p.status === 'draft').reduce((s, p) => s + BigInt(p.totalRaw), 0n).toString(),
+      fundedRaw: proposals.filter(p => p.status === 'funded').reduce((s, p) => s + BigInt(p.totalRaw), 0n).toString(),
+      signerFeesRaw: fees.toString(), pendingDeposits, historyAvailable: chain.state.lastSyncedBlock >= chain.state.finalizedBlock } satisfies TreasuryLedger;
+  });
   if (options.serverless && options.connect !== false) {
     app.addHook('preHandler', async request => {
       const path = request.url.split('?')[0];
