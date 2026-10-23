@@ -17,6 +17,7 @@
     "start": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
     "migrate:atlas": "tsx scripts/migrate-atlas.ts",
+    "verify:receipt": "tsx scripts/verify-receipt.ts",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

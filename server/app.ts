@@ -11,6 +11,7 @@ import { createChallenge, normalizeAddress, sessionHash, treasuryIdentity, verif
 import { createStore, type DataStore } from './store.js';
 import { Chain } from './chain.js';
 import { readAwardCsv } from '../shared/import.js';
+import { verifyReceipt } from './verify.js';
 
 function body(value: unknown): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected a JSON object.');
@@ -282,6 +283,10 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     reply.header('Content-Disposition', 'attachment; filename="portaflow-round-' + round.id + '.json"');
     return { application: 'PortaFlow', version: 2, network: NETWORK, round,
       treasury: await getTreasury(round.treasuryId), transactions: await store.receipts(round.id) };
+  });
+  app.post('/api/verify', { config: { rateLimit: { max: 8, timeWindow: '1 minute' } } }, async request => {
+    await chain.ready();
+    return verifyReceipt(chain.requireApi(), request.body);
   });
   app.get('/api/treasuries/:id/ledger', async request => {
     const treasury = await getTreasury(id(request));
