@@ -148,9 +148,19 @@ test('round preflight checks aggregate vesting slots for repeated recipients', a
   const store = new Store(':memory:'), chain = new Chain(store, undefined, false);
   chain.api = Object.assign(api, { isConnected: true });
   chain.state = { ...chain.state, verified: true, bestBlock: 100, finalizedBlock: 100, lastSyncedBlock: 100, specVersion: 3002, maxSchedules: 1 };
-  chain.refresh = async () => {}; chain.wallet = async address => wallet(address); chain.pending = async () => null;
+  chain.synchronizeForApproval = async () => {}; chain.wallet = async address => wallet(address); chain.pending = async () => null;
   const r = round(); r.awards = [award('one'), award('two')]; r.upfrontRaw = String(8n * UNIT); r.lockedRaw = String(32n * UNIT);
   await store.saveRound(r);
   try { await assert.rejects(chain.roundApprovalPlan(r, treasury, native(1)), /vesting schedule limit/); }
+  finally { chain.api = undefined; await store.close(); }
+});
+
+test('approval reloads the round after catch-up and refuses a payout already executed in history', async () => {
+  const store = new Store(':memory:'), chain = new Chain(store, undefined, false);
+  chain.api = Object.assign(api, { isConnected: true });
+  chain.state.verified = true;
+  const r = round(); await store.saveRound(r);
+  chain.synchronizeForApproval = async () => { await store.saveRound({ ...r, status: 'funded' }); };
+  try { await assert.rejects(chain.roundApprovalPlan(r, treasury, native(1)), /already been finalized/); }
   finally { chain.api = undefined; await store.close(); }
 });

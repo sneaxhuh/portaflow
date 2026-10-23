@@ -100,6 +100,24 @@ export class Chain {
     await this.refreshHead();
     await this.scan();
   }
+  async synchronizeForApproval(budgetMs = 20_000) {
+    await this.refreshHead();
+    // Pin the required height: new finalized blocks must not move the goal
+    // while an approval request is catching up with persisted history.
+    const target = this.state.finalizedBlock;
+    const deadline = Date.now() + budgetMs;
+    do {
+      const before = this.state.lastSyncedBlock;
+      await this.scan();
+      if (this.state.lastSyncedBlock >= target) return;
+      if (Date.now() >= deadline) break;
+      // Another serverless instance may own the scan lease. Give it time to
+      // persist progress rather than spinning or immediately rejecting review.
+      if (this.state.lastSyncedBlock <= before) await new Promise(resolve => setTimeout(resolve, 250));
+    } while (Date.now() < deadline);
+    const remaining = Math.max(0, target - this.state.lastSyncedBlock);
+    throw Object.assign(new Error(`Synchronizing payout history: ${remaining} blocks remaining (indexed #${this.state.lastSyncedBlock}, target #${target}). Progress is saved; retry review to continue.`), { statusCode: 503 });
+  }
   async tick() {
     if (this.busy) return;
     this.busy = true;
@@ -174,10 +192,9 @@ export class Chain {
   }
   async approvalPlan(award: Award, treasury: Treasury, signer: string, cancel = false): Promise<TransactionPlan> {
     const api = this.requireApi();
-    await this.refresh();
+    await this.synchronizeForApproval();
     const latest = (await this.store.award(award.id))!;
     if (['funded', 'cancelled', 'failed'].includes(latest.status)) throw new Error('This award has already been finalized. Refresh its receipt.');
-    if (this.state.lastSyncedBlock < this.state.finalizedBlock) throw new Error('Catching up with finalized blocks. Please try again shortly.');
     if (!treasury.signatories.includes(signer)) throw new Error('Only a treasury signer can approve this award.');
     const prepared = await this.prepare(latest, treasury);
     const pending = await this.pending(treasury, prepared);
@@ -232,12 +249,11 @@ export class Chain {
     } finally { await this.store.releaseLease(key, owner); }
   }
   async roundApprovalPlan(round: PayoutRound, treasury: Treasury, signer: string, cancel = false) {
-    await this.refresh();
+    await this.synchronizeForApproval();
     const api = this.requireApi();
     const latest = (await this.store.round(round.id))!;
     if (['funded', 'cancelled', 'failed'].includes(latest.status)) throw new Error('This round has already been finalized.');
     if (!treasury.signatories.includes(signer)) throw new Error('Only a treasury signer can approve this round.');
-    if (this.state.lastSyncedBlock < this.state.finalizedBlock) throw new Error('Finalized history is catching up. Retry after synchronization.');
     const prepared = await this.prepareRound(latest, treasury);
     const pending = await this.pending(treasury, prepared);
     const others = treasury.signatories.filter(a => !sameAddress(a, signer));

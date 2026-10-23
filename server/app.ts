@@ -261,11 +261,10 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
   });
   app.post('/api/rounds/:id/cancel-plan', async request => {
     const signer = auth(request);
-    await chain.refresh();
+    await chain.synchronizeForApproval();
     const round = await getRound(id(request));
     const treasury = await getTreasury(round.treasuryId);
     if (!treasury.signatories.includes(signer)) throw new Error('Only treasury signers can cancel this round.');
-    if (chain.state.lastSyncedBlock < chain.state.finalizedBlock) throw new Error('Finalized history is catching up. Try again shortly.');
     const owner = randomUUID(), key = 'prepare-round:' + round.id;
     if (!await store.acquireLease(key, owner, 30_000)) throw new Error('Another signer is preparing this round. Try again shortly.');
     try {
