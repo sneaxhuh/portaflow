@@ -8,7 +8,7 @@ export const NETWORK = {
 
 export type Treasury = {
   id: string; name: string; address: string; signatories: string[];
-  threshold: number; creator: string; createdAt: string;
+  threshold: number; creator: string; createdAt: string; createdBlock?: number;
 };
 export type Award = {
   id: string; treasuryId: string; title: string; recipient: string; workUrl: string;
@@ -54,5 +54,41 @@ export type TransactionPlan = {
 };
 export type Overview = {
   network: NetworkState; treasuries: Treasury[]; awards: Award[];
+  rounds?: PayoutRound[];
   session: { address: string } | null;
+};
+
+export type PayoutRound = {
+  id: string; treasuryId: string; title: string; awards: Award[];
+  totalRaw: string; upfrontRaw: string; lockedRaw: string;
+  createdAt: string; createdBy: string; createdBlock: number; startDelayBlocks: number;
+  status: Award['status']; callHex?: string; callHash?: string; termsHash?: string;
+  specVersion?: number; preparedBlock?: number; fundingBlock?: number; fundingTx?: string; failure?: string;
+};
+export type RoundDetail = {
+  round: PayoutRound; treasury: Treasury; pending: PendingApproval | null;
+  receipts: Receipt[]; reviewRequired: boolean;
+};
+export type LedgerEntry = {
+  id: string; treasuryId: string; txHash: string; blockHash: string; blockNumber: number;
+  extrinsicIndex: number; eventIndex: number; timestamp: string;
+  direction: 'incoming' | 'outgoing'; counterparty: string; amountRaw: string;
+};
+export type TreasuryLedger = {
+  wallet: WalletState; entries: LedgerEntry[]; coverageFromBlock: number; syncedToBlock: number;
+  pendingRaw: string; draftsRaw: string; fundedRaw: string; signerFeesRaw: string;
+  pendingDeposits: { proposalId: string; title: string; depositor: string; amountRaw: string }[];
+  historyAvailable: boolean;
+};
+export type ReceiptBundle = {
+  application: 'PortaFlow'; version: 1 | 2; network: typeof NETWORK; treasury: Treasury;
+  award?: Award; round?: PayoutRound; transactions: Receipt[];
+};
+export type Verification = {
+  status: 'verified' | 'invalid' | 'unavailable'; subject: string; txHash?: string; blockNumber?: number;
+  checks: { label: string; passed: boolean; detail: string }[];
+};
+export type RecipientPortal = {
+  address: string; wallet: WalletState; awards: (Award & { roundId?: string; treasuryName: string })[];
+  totalFundedRaw: string; totalImmediateRaw: string; totalVestedRaw: string;
 };

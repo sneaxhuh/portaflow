@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { MongoStore } from '../server/mongo-store.js';
-import type { Award, Receipt, Treasury } from '../shared/types.js';
+import type { Award, Receipt, Treasury, PayoutRound, LedgerEntry } from '../shared/types.js';
 
 if (!process.env.MONGODB_URI) throw new Error('Set MONGODB_URI securely in your environment before running the migration.');
 const source = new DatabaseSync(process.env.PORTAFLOW_DB || '.portaflow/portaflow.sqlite', { readOnly: true });
@@ -19,7 +19,13 @@ try {
   if (fresh.length) await target.saveAwards(fresh);
   const receipts = source.prepare('SELECT data FROM receipts').all().map(row => JSON.parse(String(row.data)) as Receipt);
   for (const receipt of receipts) await target.saveReceipt(receipt);
-  for (const row of source.prepare("SELECT key, value FROM meta WHERE key LIKE 'cursor:%'").all()) {
+  const tables = new Set(source.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(row => String(row.name)));
+  if (tables.has('rounds')) for (const row of source.prepare('SELECT data FROM rounds').all()) {
+    const round = JSON.parse(String(row.data)) as PayoutRound;
+    if (!await target.round(round.id)) await target.saveRound(round);
+  }
+  if (tables.has('ledger')) for (const row of source.prepare('SELECT data FROM ledger').all()) await target.saveLedger(JSON.parse(String(row.data)) as LedgerEntry);
+  for (const row of source.prepare("SELECT key, value FROM meta WHERE key LIKE 'cursor:%' OR key = 'ledger:from'").all()) {
     if (await target.getMeta(String(row.key)) === undefined) await target.setMeta(String(row.key), String(row.value));
   }
   console.log(`Migration complete: ${treasuryCount} new treasuries, ${fresh.length} new awards, ${receipts.length} receipts checked. Login sessions were excluded.`);

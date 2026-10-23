@@ -1,17 +1,21 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { Award, Receipt, Treasury } from '../shared/types.js';
+import type { Award, Receipt, Treasury, PayoutRound, LedgerEntry } from '../shared/types.js';
 
 export type Challenge = { id: string; address: string; message: string; expires: number };
 export type Session = { address: string; expires: number };
 export interface DataStore {
-  list<T>(table: 'treasuries' | 'awards'): Promise<T[]>;
+  list<T>(table: 'treasuries' | 'awards' | 'rounds'): Promise<T[]>;
   treasury(id: string): Promise<Treasury | undefined>;
   award(id: string): Promise<Award | undefined>;
   saveTreasury(treasury: Treasury): Promise<void>;
   saveAward(award: Award): Promise<void>;
   saveAwards(awards: Award[]): Promise<void>;
+  round(id: string): Promise<PayoutRound | undefined>;
+  saveRound(round: PayoutRound): Promise<void>;
+  saveLedger(entry: LedgerEntry): Promise<void>;
+  ledger(treasuryId: string): Promise<LedgerEntry[]>;
   saveReceipt(receipt: Receipt): Promise<void>;
   receipts(id: string): Promise<Receipt[]>;
   getMeta(key: string): Promise<string | undefined>;
@@ -38,6 +42,9 @@ export class Store implements DataStore {
       'PRAGMA journal_mode=WAL;',
       'CREATE TABLE IF NOT EXISTS treasuries (id TEXT PRIMARY KEY, data TEXT NOT NULL);',
       'CREATE TABLE IF NOT EXISTS awards (id TEXT PRIMARY KEY, call_hash TEXT UNIQUE, data TEXT NOT NULL);',
+      'CREATE TABLE IF NOT EXISTS rounds (id TEXT PRIMARY KEY, call_hash TEXT UNIQUE, data TEXT NOT NULL);',
+      'CREATE TABLE IF NOT EXISTS ledger (id TEXT PRIMARY KEY, treasury_id TEXT NOT NULL, block_number INTEGER NOT NULL, data TEXT NOT NULL);',
+      'CREATE INDEX IF NOT EXISTS ledger_treasury ON ledger(treasury_id, block_number);',
       'CREATE TABLE IF NOT EXISTS receipts (tx_hash TEXT NOT NULL, award_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (tx_hash, award_id));',
       'CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);',
       'CREATE TABLE IF NOT EXISTS challenges (id TEXT PRIMARY KEY, address TEXT NOT NULL, message TEXT NOT NULL, expires INTEGER NOT NULL);',
@@ -46,7 +53,7 @@ export class Store implements DataStore {
       'CREATE TABLE IF NOT EXISTS leases (key TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL);',
     ].join('\n'));
   }
-  async list<T>(table: 'treasuries' | 'awards'): Promise<T[]> {
+  async list<T>(table: 'treasuries' | 'awards' | 'rounds'): Promise<T[]> {
     return (this.db.prepare('SELECT data FROM ' + table + ' ORDER BY rowid DESC').all() as { data: string }[]).map(row => JSON.parse(row.data));
   }
   async treasury(id: string): Promise<Treasury | undefined> {
@@ -73,6 +80,20 @@ export class Store implements DataStore {
   }
   async saveReceipt(receipt: Receipt) {
     this.db.prepare('INSERT OR IGNORE INTO receipts (tx_hash, award_id, data) VALUES (?, ?, ?)').run(receipt.txHash, receipt.awardId, JSON.stringify(receipt));
+  }
+  async round(id: string): Promise<PayoutRound | undefined> {
+    const row = this.db.prepare('SELECT data FROM rounds WHERE id = ?').get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : undefined;
+  }
+  async saveRound(round: PayoutRound) {
+    this.db.prepare('INSERT INTO rounds (id, call_hash, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET call_hash = excluded.call_hash, data = excluded.data')
+      .run(round.id, round.callHash ?? null, JSON.stringify(round));
+  }
+  async saveLedger(entry: LedgerEntry) {
+    this.db.prepare('INSERT OR IGNORE INTO ledger VALUES (?, ?, ?, ?)').run(entry.id, entry.treasuryId, entry.blockNumber, JSON.stringify(entry));
+  }
+  async ledger(treasuryId: string): Promise<LedgerEntry[]> {
+    return (this.db.prepare('SELECT data FROM ledger WHERE treasury_id = ? ORDER BY block_number DESC, id DESC LIMIT 500').all(treasuryId) as { data: string }[]).map(row => JSON.parse(row.data));
   }
   async receipts(id: string): Promise<Receipt[]> {
     return (this.db.prepare('SELECT data FROM receipts WHERE award_id = ? ORDER BY rowid').all(id) as { data: string }[]).map(row => JSON.parse(row.data));

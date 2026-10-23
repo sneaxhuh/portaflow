@@ -1,5 +1,5 @@
 import { MongoClient, MongoServerError, type Db, type Collection, type Document } from 'mongodb';
-import type { Award, Receipt, Treasury } from '../shared/types.js';
+import type { Award, Receipt, Treasury, PayoutRound, LedgerEntry } from '../shared/types.js';
 import type { Challenge, DataStore, Session } from './store.js';
 
 type Entry<T> = { _id: string; data: T; callHash?: string };
@@ -22,11 +22,13 @@ export class MongoStore implements DataStore {
     await Promise.all([
       this.db.collection('treasuries').createIndex({ 'data.address': 1 }, { unique: true }),
       this.db.collection('awards').createIndex({ callHash: 1 }, { unique: true, partialFilterExpression: { callHash: { $type: 'string' } } }),
+      this.db.collection('rounds').createIndex({ callHash: 1 }, { unique: true, partialFilterExpression: { callHash: { $type: 'string' } } }),
+      this.db.collection('ledger').createIndex({ 'data.treasuryId': 1, 'data.blockNumber': -1 }),
       this.db.collection('receipts').createIndex({ 'data.awardId': 1, 'data.blockNumber': 1 }),
       ...['sessions', 'challenges'].map(name => this.db.collection(name).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })),
     ]);
   }
-  async list<T>(table: 'treasuries' | 'awards'): Promise<T[]> {
+  async list<T>(table: 'treasuries' | 'awards' | 'rounds'): Promise<T[]> {
     return (await this.collection<Entry<T>>(table).find({}).sort({ 'data.createdAt': -1, _id: -1 }).toArray()).map(row => row.data);
   }
   async treasury(id: string) { return (await this.collection<Entry<Treasury>>('treasuries').findOne({ _id: id }))?.data; }
@@ -53,6 +55,18 @@ export class MongoStore implements DataStore {
   async receipts(id: string) {
     return (await this.collection<Entry<Receipt>>('receipts').find({ 'data.awardId': id })
       .sort({ 'data.blockNumber': 1, 'data.extrinsicIndex': 1, _id: 1 }).toArray()).map(row => row.data);
+  }
+  async round(id: string) { return (await this.collection<Entry<PayoutRound>>('rounds').findOne({ _id: id }))?.data; }
+  async saveRound(round: PayoutRound) {
+    await this.collection<Entry<PayoutRound>>('rounds').replaceOne({ _id: round.id },
+      { data: round, ...(round.callHash ? { callHash: round.callHash } : {}) }, { upsert: true });
+  }
+  async saveLedger(entry: LedgerEntry) {
+    await this.collection<Entry<LedgerEntry>>('ledger').updateOne({ _id: entry.id }, { $setOnInsert: { data: entry } }, { upsert: true });
+  }
+  async ledger(treasuryId: string) {
+    return (await this.collection<Entry<LedgerEntry>>('ledger').find({ 'data.treasuryId': treasuryId })
+      .sort({ 'data.blockNumber': -1, 'data.extrinsicIndex': -1, 'data.eventIndex': -1 }).limit(500).toArray()).map(row => row.data);
   }
   async getMeta(key: string) { return (await this.collection<{ _id: string; value: string }>('meta').findOne({ _id: key }))?.value; }
   async setMeta(key: string, value: string) {
