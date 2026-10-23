@@ -1,0 +1,228 @@
+/* Integrate Lovable's workbench design with PortaFlow's live components and dialogs. */
+body.portaflow-redesign { --pf-font: 'Geist Variable', system-ui, sans-serif; --pf-mono: ui-monospace, SFMono-Regular, Menlo, monospace; --line: var(--pf-rule); --muted: var(--pf-muted); --subtle: var(--pf-faint); color-scheme: light; }
+body.portaflow-redesign .brand { align-items: center; gap: 8px; margin: 0 4px 16px; padding: 4px; font-size: 20px; }
+body.portaflow-redesign .brand svg { width: 23px; height: 23px; }
+body.portaflow-redesign .workspace-select { margin-bottom: 12px; }
+body.portaflow-redesign .workspace-select select { color: var(--pf-ink); }
+body.portaflow-redesign select option { color: var(--pf-ink); background: var(--pf-surface); }
+body.portaflow-redesign .navigation-groups { display: grid; gap: 10px; }
+body.portaflow-redesign .nav-section-label { margin: 6px 0; color: #777a7b; font-size: 10px; letter-spacing: .08em; }
+body.portaflow-redesign .menu a { height: 34px; min-height: 34px; font-size: 13px; }
+body.portaflow-redesign .sidebar-bottom { gap: 2px; margin-top: auto; padding-top: 14px; }
+body.portaflow-redesign .nav-secondary { display: flex; align-items: center; gap: 8px; padding: 7px 8px; color: var(--pf-muted); font-size: 12px; text-decoration: none; }
+body.portaflow-redesign .nav-secondary svg { width: 14px; height: 14px; }
+body.portaflow-redesign .nav-secondary:hover { background: var(--pf-sidebar-hover); color: var(--pf-ink); }
+body.portaflow-redesign .sidebar-network { padding: 12px 8px 0; margin: 12px 0 0; border-color: var(--pf-rule); font-size: 11px; }
+body.portaflow-redesign .connection-dot { background: var(--pf-faint); }
+body.portaflow-redesign .connection-dot.online { background: var(--pf-ok); }
+body.portaflow-redesign .version { color: var(--pf-muted); }
+body.portaflow-redesign .topbar { min-height: 56px; height: 56px; }
+body.portaflow-redesign .mobile-menu { display: none; }
+body.portaflow-redesign .eyebrow { display: none; }
+body.portaflow-redesign .page-heading { align-items: center; margin-bottom: 26px; }
+body.portaflow-redesign .page-heading p { font-size: 13px; margin-top: 7px; line-height: 1.7; }
+body.portaflow-redesign .page-loading { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 240px; color: var(--pf-muted); font-size: 13px; }
+body.portaflow-redesign .heading-actions [data-slot=button] { min-height: 34px; }
+body.portaflow-redesign [data-slot=button][data-variant=default] { background: var(--pf-accent); color: white; border-color: var(--pf-accent); }
+body.portaflow-redesign [data-slot=button][data-variant=default]:hover { background: var(--pf-accent-hover); }
+body.portaflow-redesign [data-slot=button][data-variant=ghost] { background: transparent; border-color: transparent; }
+body.portaflow-redesign [data-slot=button][data-variant=ghost]:hover { background: var(--pf-sidebar); }
+body.portaflow-redesign [data-slot=button][data-size^=icon] { padding: 0; width: 30px; height: 30px; }
+body.portaflow-redesign [data-slot=button][data-size=icon-xs] { width: 24px; height: 24px; }
+body.portaflow-redesign [data-slot=button]:disabled { opacity: .45; cursor: not-allowed; }
+body.portaflow-redesign .stats-strip { border-left: 0; border-right: 0; border-radius: 0; }
+body.portaflow-redesign .stat-item { border-right: 0; }
+body.portaflow-redesign .stat-item > span:first-child svg { display: none; }
+body.portaflow-redesign .stat-item > strong { display: block; margin: 5px 0; font-size: 24px; letter-spacing: -.6px; }
+body.portaflow-redesign .stat-item > strong .money { font-size: inherit; }
+body.portaflow-redesign .stat-item:first-child > strong { font-size: 34px; }
+body.portaflow-redesign .stat-word, body.portaflow-redesign .stat-item .unit { font-size: 12px; color: var(--pf-muted); }
+body.portaflow-redesign .stat-item small { line-height: 1.6; font-size: 11px; }
+body.portaflow-redesign .overview-grid { grid-template-columns: minmax(0, 1fr) 264px; gap: 24px; margin-bottom: 24px; }
+body.portaflow-redesign .overview-primary { display: grid; gap: 24px; min-width: 0; }
+body.portaflow-redesign .overview-primary > .op-card { margin: 0; }
+body.portaflow-redesign .treasury-summary { display: block; }
+body.portaflow-redesign .schedule-row { display: block; text-align: left; padding: 17px 0; }
+body.portaflow-redesign .schedule-row-heading { color: var(--pf-ink); font-size: 13px; }
+body.portaflow-redesign .schedule-row-caption { font-size: 11px; color: var(--pf-muted); }
+body.portaflow-redesign .schedule-list { padding: 0 16px 8px; }
+body.portaflow-redesign .progress { color: var(--pf-accent); background: var(--pf-rule); }
+body.portaflow-redesign .treasury-name strong, body.portaflow-redesign .compact-details dd { color: var(--pf-ink); }
+body.portaflow-redesign .treasury-monogram, body.portaflow-redesign .empty-symbol { color: var(--pf-ink-2); background: var(--pf-sidebar); border-color: var(--pf-rule); }
+body.portaflow-redesign .treasury-onboarding h3, body.portaflow-redesign .treasury-onboarding p { color: var(--pf-ink-2); }
+body.portaflow-redesign .treasury-balance > .money { font-size: 32px; }
+body.portaflow-redesign .address-box { margin: 0 16px 16px; }
+body.portaflow-redesign .address-box code { color: var(--pf-ink-2); font-size: 11px; }
+body.portaflow-redesign .full-address { display: flex; flex-wrap: wrap; gap: 7px; padding: 14px 16px; border-color: var(--pf-rule); background: var(--pf-canvas); }
+body.portaflow-redesign .full-address code { color: var(--pf-ink-2); }
+body.portaflow-redesign .row-file { width: 28px; height: 28px; color: var(--pf-muted); border-color: var(--pf-rule); background: var(--pf-canvas); }
+body.portaflow-redesign .row-title { color: var(--pf-ink); font-size: 13px; }
+body.portaflow-redesign .row-title small, body.portaflow-redesign .schedule-label { color: var(--pf-muted); font-size: 11px; }
+body.portaflow-redesign .award-table .row-title { display: flex; align-items: center; gap: 10px; }
+body.portaflow-redesign .award-table .row-title strong { color: var(--pf-ink); font-size: 13px; }
+body.portaflow-redesign .table-toolbar, body.portaflow-redesign .table-tabs button { color: var(--pf-muted); }
+body.portaflow-redesign .table-tabs button.active { color: var(--pf-ink); }
+body.portaflow-redesign .table-tabs button span { background: var(--pf-sidebar); color: var(--pf-ink-2); }
+body.portaflow-redesign .search-field { background: var(--pf-surface); border-color: var(--pf-rule-strong); color: var(--pf-muted); }
+body.portaflow-redesign .search-field input { color: var(--pf-ink); }
+body.portaflow-redesign .search-field kbd { background: var(--pf-canvas); border-color: var(--pf-rule); color: var(--pf-muted); }
+body.portaflow-redesign .op-card [data-slot=card-header]:not(.op-card-heading) { flex-direction: column; align-items: stretch; gap: 7px; }
+body.portaflow-redesign .op-card [data-slot=card-title] { line-height: 1.5; }
+body.portaflow-redesign .panel, body.portaflow-redesign .op-card, body.portaflow-redesign [data-slot=card] { color: var(--pf-ink); }
+body.portaflow-redesign .op-card [data-slot=card-title] { color: var(--pf-ink); }
+body.portaflow-redesign .op-card [data-slot=table-row], body.portaflow-redesign .table tr { border-color: var(--pf-rule); }
+body.portaflow-redesign .op-summary-row > .op-money small { display: inline; margin: 0; font-size: .75em; }
+body.portaflow-redesign .op-card [data-slot=card-description] { font-size: 12px; line-height: 1.7; }
+body.portaflow-redesign .op-card [data-slot=card-content] { padding: 18px; }
+body.portaflow-redesign .op-card-heading { flex-wrap: wrap; }
+body.portaflow-redesign .op-card-heading [data-slot=card-description] { margin-top: 3px; }
+body.portaflow-redesign .op-card [data-slot=table-cell] { font-size: 13px; padding: 16px; }
+body.portaflow-redesign .op-card [data-slot=table-head] { height: 38px; }
+body.portaflow-redesign .op-row-title { color: var(--pf-ink); font-size: 13px; }
+body.portaflow-redesign .op-row-title small { margin-top: 5px; font-size: 11px; color: var(--pf-muted); }
+body.portaflow-redesign .op-money small { color: var(--pf-muted); }
+body.portaflow-redesign .op-filter { padding: 14px 16px; border-bottom: 1px solid var(--pf-rule); }
+body.portaflow-redesign .op-filter [data-slot=tabs-list] { margin: 0; }
+body.portaflow-redesign .op-empty, body.portaflow-redesign .empty-state, body.portaflow-redesign .schedule-empty { min-height: 160px; gap: 10px; }
+body.portaflow-redesign .op-empty h3, body.portaflow-redesign .empty-state h3, body.portaflow-redesign .schedule-empty h3 { color: var(--pf-ink); font-size: 14px; }
+body.portaflow-redesign .op-empty p, body.portaflow-redesign .empty-state p, body.portaflow-redesign .schedule-empty p { color: var(--pf-muted); font-size: 12px; line-height: 1.8; }
+body.portaflow-redesign .op-metrics { border-radius: 0; border-left: 0; border-right: 0; margin-bottom: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+body.portaflow-redesign .op-metrics > div { border-color: var(--pf-rule); padding: 18px; gap: 12px; }
+body.portaflow-redesign .op-metrics > div > span { font-size: 12px; color: var(--pf-muted); }
+body.portaflow-redesign .op-metrics strong { font-size: 28px; }
+body.portaflow-redesign .op-metrics small { font-size: 11px; color: var(--pf-muted); }
+body.portaflow-redesign .op-round-totals { margin: 0; border: 0; border-radius: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+body.portaflow-redesign .op-round-totals > div { padding: 14px; border-color: var(--pf-rule); }
+body.portaflow-redesign .op-round-totals > div > span:first-child { font-size: 11px; color: var(--pf-muted); }
+body.portaflow-redesign .op-round-totals strong { color: var(--pf-ink); }
+body.portaflow-redesign .op-total { font-size: 32px; line-height: 1.4; }
+body.portaflow-redesign .op-payment-name strong { color: var(--pf-ink); }
+body.portaflow-redesign .op-payment-name code, body.portaflow-redesign .op-payment-name small, body.portaflow-redesign .op-release-cell small { color: var(--pf-muted); font-size: 11px; }
+body.portaflow-redesign .op-release-cell [data-slot=progress] { background: var(--pf-rule); }
+body.portaflow-redesign .op-release-cell [data-slot=progress-indicator] { background: var(--pf-accent); }
+body.portaflow-redesign .op-signers > div, body.portaflow-redesign .op-evidence { border-color: var(--pf-rule); }
+body.portaflow-redesign .op-signers > div { font-size: 13px; }
+body.portaflow-redesign .op-signers small, body.portaflow-redesign .op-evidence small { font-size: 11px; color: var(--pf-muted); }
+body.portaflow-redesign .op-evidence strong { color: var(--pf-ink); font-size: 13px; }
+body.portaflow-redesign .op-evidence code { color: var(--pf-muted); font-size: 10px; }
+body.portaflow-redesign .op-hash { background: var(--pf-canvas); border-color: var(--pf-rule); color: var(--pf-ink-2); }
+body.portaflow-redesign .op-notice { border-color: #ecd9ad; border-left-color: var(--pf-warn); background: var(--pf-warn-weak); color: #735016; }
+body.portaflow-redesign .op-unlock-card { display: block; background: var(--pf-surface); border-color: var(--pf-rule); padding: 0; }
+body.portaflow-redesign .op-unlock-card [data-slot=card-content] { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 20px; }
+body.portaflow-redesign .op-immediate { background: var(--pf-ok-weak); color: var(--pf-ok); border-color: #c7dfd2; }
+body.portaflow-redesign .op-checks > div { border-color: var(--pf-rule); }
+body.portaflow-redesign .op-checks strong { color: var(--pf-ink); font-size: 13px; }
+body.portaflow-redesign .op-checks p { color: var(--pf-muted); font-size: 12px; }
+body.portaflow-redesign .check-pass { background: var(--pf-ok-weak); color: var(--pf-ok); }
+body.portaflow-redesign .check-fail { background: var(--pf-err-weak); color: var(--pf-err); }
+body.portaflow-redesign .op-verifier .import-file { background: var(--pf-canvas); }
+body.portaflow-redesign .verification-verified { border-color: #b4d4c1; }
+body.portaflow-redesign .verification-verified [data-slot=badge] { background: var(--pf-ok-weak); color: var(--pf-ok); border-color: #b4d4c1; }
+body.portaflow-redesign .verification-invalid { border-color: #e0b4b0; }
+body.portaflow-redesign .op-verifier-note { margin-top: 18px; }
+body.portaflow-redesign .op-address-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+body.portaflow-redesign .op-address-search [data-slot=input] { min-width: 0; height: 38px; flex-basis: auto; }
+body.portaflow-redesign .award-status-funded { background: var(--pf-ok-weak); border-color: #c7dfd2; color: var(--pf-ok); }
+body.portaflow-redesign .award-status-awaiting_approval { background: var(--pf-warn-weak); border-color: #ecd9ad; color: var(--pf-warn); }
+body.portaflow-redesign .award-status-funded .status-dot { background: var(--pf-ok); }
+body.portaflow-redesign .back-link { color: var(--pf-muted); }
+body.portaflow-redesign .info-block, body.portaflow-redesign .commitment-note { background: var(--pf-canvas); border-color: var(--pf-rule); color: var(--pf-muted); }
+body.portaflow-redesign .info-block p, body.portaflow-redesign .commitment-note p { color: var(--pf-muted); font-size: 12px; }
+body.portaflow-redesign .signer-row strong, body.portaflow-redesign .recipient-row strong { color: var(--pf-ink); font-size: 13px; }
+body.portaflow-redesign .signer-row small, body.portaflow-redesign .recipient-row small { color: var(--pf-muted); font-size: 11px; }
+body.portaflow-redesign .recipient-detail code { color: var(--pf-ink-2); font-size: 11px; }
+body.portaflow-redesign .work-reference { border-color: var(--pf-rule); font-size: 12px; }
+body.portaflow-redesign .person-avatar.approved { background: var(--pf-ok-weak); border-color: #c7dfd2; color: var(--pf-ok); }
+body.portaflow-redesign .vesting-amounts strong { color: var(--pf-ink); }
+body.portaflow-redesign .chart-markers, body.portaflow-redesign .schedule-progress-caption { color: var(--pf-muted); font-size: 11px; }
+body.portaflow-redesign .chart-markers strong { color: var(--pf-ink-2); }
+body.portaflow-redesign .schedule-progress-heading { color: var(--pf-ink-2); font-size: 12px; }
+body.portaflow-redesign .schedule-progress-track { background: var(--pf-rule); }
+body.portaflow-redesign .schedule-progress-fill, body.portaflow-redesign .schedule-block-marker { background: var(--pf-accent); }
+body.portaflow-redesign .schedule-progress-fill::after { display: none; }
+body.portaflow-redesign .schedule-block-marker { border-color: white; color: white; box-shadow: none; }
+body.portaflow-redesign .unlock-box { background: var(--pf-ok-weak); border-color: #c7dfd2; }
+body.portaflow-redesign .unlock-box strong { color: var(--pf-ink); }
+body.portaflow-redesign .unlock-box > div > span { color: var(--pf-ink-2); font-size: 12px; }
+body.portaflow-redesign .activity-row { border-color: var(--pf-rule); }
+body.portaflow-redesign .activity-icon { color: var(--pf-ok); background: var(--pf-ok-weak); }
+body.portaflow-redesign .activity-row strong { color: var(--pf-ink); font-size: 13px; }
+body.portaflow-redesign .activity-row small, body.portaflow-redesign .hash-link { color: var(--pf-muted); font-size: 11px; }
+body.portaflow-redesign .pf-dialog, body.portaflow-redesign [data-slot=dialog-content] { max-width: 540px; width: calc(100vw - 32px); padding: 24px; max-height: calc(100dvh - 32px); transform: none; translate: -50% -50%; }
+body.portaflow-redesign .pf-dialog:hover, body.portaflow-redesign [data-slot=dialog-content]:hover { transform: none; }
+body.portaflow-redesign .pf-dialog-wide { max-width: 760px; }
+body.portaflow-redesign .modal-heading { padding: 0 0 16px; margin: 0 0 20px; }
+body.portaflow-redesign [data-slot=dialog-title] { font-size: 22px; color: var(--pf-ink); }
+body.portaflow-redesign .modal-description { color: var(--pf-muted); font-size: 13px; }
+body.portaflow-redesign .field-label { margin: 16px 0; font-size: 13px; }
+body.portaflow-redesign .field-label [data-slot=input] { margin-top: 8px; }
+body.portaflow-redesign .pf-dialog [data-slot=input], body.portaflow-redesign .pf-dialog .input, body.portaflow-redesign .pf-dialog .select { height: 38px; }
+body.portaflow-redesign .form-columns { gap: 16px; }
+body.portaflow-redesign .form-split { display: flex; border-color: var(--pf-rule); background: var(--pf-canvas); padding: 12px 14px; }
+body.portaflow-redesign .form-split > div { color: var(--pf-ink); }
+body.portaflow-redesign .op-payment-editor { display: grid; gap: 18px; padding: 0; border: 0; margin-top: 20px; overflow: visible; }
+body.portaflow-redesign .op-payment-row { display: block; padding: 4px 16px 0; margin: 0; background: var(--pf-canvas); border: 1px solid var(--pf-rule); border-radius: 5px; }
+body.portaflow-redesign .op-payment-row:last-child { border-bottom: 1px solid var(--pf-rule); }
+body.portaflow-redesign .op-payment-row legend { color: var(--pf-muted); font-size: 12px; }
+body.portaflow-redesign .op-payment-row .field-label { margin: 14px 0; }
+body.portaflow-redesign .op-payment-row .form-columns .field-label { margin: 0; }
+body.portaflow-redesign .op-row-controls { right: 10px; top: 8px; }
+body.portaflow-redesign .round-form .op-round-totals { background: var(--pf-canvas); border: 1px solid var(--pf-rule); margin-top: 22px; border-radius: 4px; }
+body.portaflow-redesign .op-review-payments { border: 0; margin-top: 14px; }
+body.portaflow-redesign .op-review-payments > div { border-color: var(--pf-rule); font-size: 13px; }
+body.portaflow-redesign .op-review-payments code, body.portaflow-redesign .op-review-payments small { color: var(--pf-muted); }
+body.portaflow-redesign .op-import-preview > div { border-color: var(--pf-rule); }
+body.portaflow-redesign .modal-footer { margin: 22px 0 0; padding: 18px 0 0; background: transparent; border-color: var(--pf-rule); }
+body.portaflow-redesign .commitment-checkbox { font-size: 12px; color: var(--pf-ink-2); padding: 12px; }
+body.portaflow-redesign .checkbox { border-color: var(--pf-rule-strong); background: white; }
+body.portaflow-redesign .checkbox:checked { background: var(--pf-accent); border-color: var(--pf-accent); color: white; }
+body.portaflow-redesign .commitment-checkbox input[type=checkbox] { appearance: auto; accent-color: var(--pf-accent); background: initial; border: initial; box-shadow: none; }
+body.portaflow-redesign .wallet-option-icon { background: var(--pf-canvas); border-color: var(--pf-rule); color: var(--pf-ink-2); }
+body.portaflow-redesign .wallet-option strong { font-size: 13px; }
+body.portaflow-redesign .wallet-option small, body.portaflow-redesign .wallet-network-help, body.portaflow-redesign .wallet-current { color: var(--pf-muted); font-size: 12px; }
+body.portaflow-redesign .wallet-network, body.portaflow-redesign .wallet-guidance { background: var(--pf-canvas); border-color: var(--pf-rule); }
+body.portaflow-redesign .wallet-network strong, body.portaflow-redesign .wallet-network code { color: var(--pf-ink-2); }
+body.portaflow-redesign .guide-step > span { border-color: var(--pf-rule); color: var(--pf-muted); }
+body.portaflow-redesign .guide-step p { color: var(--pf-muted); font-size: 12px; }
+body.portaflow-redesign .review-details { margin-top: 18px; }
+body.portaflow-redesign .review-details dd { color: var(--pf-ink); }
+body.portaflow-redesign .review-target small { color: var(--pf-muted); font-size: 12px; }
+body.portaflow-redesign .review-target strong { color: var(--pf-ink); font-size: 14px; }
+body.portaflow-redesign .toast { padding: 0; border: 0; background: transparent; box-shadow: none; }
+body.portaflow-redesign .toast .alert { background: var(--pf-surface); border-color: var(--pf-rule-strong); color: var(--pf-ink); box-shadow: 0 4px 14px #0000000c; }
+body.portaflow-redesign .toast .error-alert { background: var(--pf-err-weak); color: var(--pf-err); }
+body.portaflow-redesign .workspace-footer { margin-top: 28px; padding: 18px 0 0; font-size: 11px; }
+body.portaflow-redesign .navigation-backdrop { background: #1b1c1e44; z-index: 35; }
+@media (max-width: 1080px) { body.portaflow-redesign .overview-grid { grid-template-columns: minmax(0, 1fr); } body.portaflow-redesign .treasury-summary { display: none; } }
+@media (max-width: 720px) {
+  body.portaflow-redesign { min-width: 350px; }
+  body.portaflow-redesign .sidebar { transition: none; }
+  body.portaflow-redesign .mobile-menu { display: inline-flex; }
+  body.portaflow-redesign .page-heading { align-items: stretch; }
+  body.portaflow-redesign .page-heading p { max-width: none; font-size: 13px; }
+  body.portaflow-redesign .stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.portaflow-redesign .stat-item { padding: 16px 12px; }
+  body.portaflow-redesign .stat-item:first-child > strong { font-size: 30px; }
+  body.portaflow-redesign .stat-item > strong { font-size: 24px; }
+  body.portaflow-redesign .stat-item small { font-size: 10px; }
+  body.portaflow-redesign .stat-item:nth-child(2) { border-top: 0; }
+  body.portaflow-redesign .op-metrics { grid-template-columns: 1fr; }
+  body.portaflow-redesign .op-metrics > div { border-right: 0; border-bottom: 1px solid var(--pf-rule); }
+  body.portaflow-redesign .op-metrics > div:last-child { border-bottom: 0; }
+  body.portaflow-redesign .op-unlock-card [data-slot=card-content] { align-items: stretch; flex-direction: column; }
+  body.portaflow-redesign .op-round-totals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  body.portaflow-redesign .op-round-totals > div { padding: 12px 8px; }
+  body.portaflow-redesign .op-round-totals > div > span:first-child { font-size: 10px; }
+  body.portaflow-redesign .op-round-totals .money, body.portaflow-redesign .op-round-totals .op-money { font-size: 12px; }
+  body.portaflow-redesign .op-two-col, body.portaflow-redesign .form-columns { grid-template-columns: 1fr; }
+  body.portaflow-redesign .op-payment-row .form-columns { gap: 14px; }
+  body.portaflow-redesign .pf-dialog { padding: 18px; }
+  body.portaflow-redesign .table-scroll > .award-table { min-width: 0; }
+  body.portaflow-redesign .award-table tbody tr { border-color: var(--pf-rule); }
+  body.portaflow-redesign .award-table td { height: auto; border: 0; padding: 0; }
+  body.portaflow-redesign .award-table td:nth-child(2)::before { color: var(--pf-muted); }
+  body.portaflow-redesign .op-card-heading { align-items: flex-start; }
+  body.portaflow-redesign .op-filter [data-slot=tabs-list] { max-width: 100%; }
+  body.portaflow-redesign .op-address-search { grid-template-columns: minmax(0, 1fr); }
+  body.portaflow-redesign .op-address-search [data-slot=button] { justify-self: end; margin: 0; }
+}

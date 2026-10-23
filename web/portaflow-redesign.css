@@ -1,0 +1,1172 @@
+/*
+ * PortaFlow — Treasury Workbench redesign
+ * Self-contained, framework-free CSS. Activate with <body class="portaflow-redesign">.
+ * Everything is scoped under body.portaflow-redesign (dialogs portal into body, so they are covered too).
+ * Fonts (optional): IBM Plex Sans + IBM Plex Mono. Falls back to system UI fonts.
+ */
+
+body.portaflow-redesign {
+  /* ---- tokens ---- */
+  --pf-canvas: #f7f7f3;
+  --pf-surface: #ffffff;
+  --pf-sidebar: #efefea;
+  --pf-sidebar-hover: #e6e6df;
+  --pf-ink: #1b1c1e;
+  --pf-ink-2: #44464b;
+  --pf-muted: #6a6c70;
+  --pf-faint: #8d8f93;
+  --pf-rule: #e2e2da;
+  --pf-rule-strong: #cfcfc6;
+  --pf-row-hover: #f9f9f5;
+  --pf-accent: #2b59c3;
+  --pf-accent-hover: #234aa6;
+  --pf-accent-weak: #e9eefa;
+  --pf-accent-ink: #ffffff;
+  --pf-ok: #1d6f47;
+  --pf-ok-weak: #e7f2ec;
+  --pf-warn: #8a5a00;
+  --pf-warn-weak: #fbf1dc;
+  --pf-err: #a8261d;
+  --pf-err-weak: #fbe9e7;
+  --pf-radius: 5px;
+  --pf-radius-sm: 4px;
+  --pf-sidebar-w: 224px;
+  --pf-topbar-h: 52px;
+  --pf-font: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --pf-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --pf-focus: 0 0 0 2px var(--pf-surface), 0 0 0 4px var(--pf-accent);
+
+  /* shadcn-style variables so shadcn primitives inherit the palette */
+  --background: var(--pf-canvas);
+  --foreground: var(--pf-ink);
+  --card: var(--pf-surface);
+  --card-foreground: var(--pf-ink);
+  --popover: var(--pf-surface);
+  --popover-foreground: var(--pf-ink);
+  --primary: var(--pf-accent);
+  --primary-foreground: var(--pf-accent-ink);
+  --secondary: var(--pf-sidebar);
+  --secondary-foreground: var(--pf-ink);
+  --muted: var(--pf-sidebar);
+  --muted-foreground: var(--pf-muted);
+  --accent: var(--pf-sidebar-hover);
+  --accent-foreground: var(--pf-ink);
+  --destructive: var(--pf-err);
+  --border: var(--pf-rule);
+  --input: var(--pf-rule-strong);
+  --ring: var(--pf-accent);
+  --radius: 5px;
+
+  margin: 0;
+  background: var(--pf-canvas);
+  color: var(--pf-ink);
+  font-family: var(--pf-font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body.portaflow-redesign *,
+body.portaflow-redesign *::before,
+body.portaflow-redesign *::after {
+  box-sizing: border-box;
+}
+
+/* No entrance animations, no hover transforms */
+body.portaflow-redesign .btn:hover,
+body.portaflow-redesign [data-slot="button"]:hover { transform: none; }
+body.portaflow-redesign .panel,
+body.portaflow-redesign .op-card,
+body.portaflow-redesign .stat-item,
+body.portaflow-redesign [data-slot="card"] { animation: none !important; transform: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  body.portaflow-redesign *,
+  body.portaflow-redesign *::before,
+  body.portaflow-redesign *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+body.portaflow-redesign :focus-visible {
+  outline: none;
+  box-shadow: var(--pf-focus);
+  border-radius: var(--pf-radius-sm);
+}
+
+body.portaflow-redesign a { color: var(--pf-accent); text-decoration: none; }
+body.portaflow-redesign a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+body.portaflow-redesign h1,
+body.portaflow-redesign h2,
+body.portaflow-redesign h3 {
+  margin: 0;
+  color: var(--pf-ink);
+  font-family: var(--pf-font);
+  letter-spacing: -0.01em;
+}
+body.portaflow-redesign h1 { font-size: 28px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; }
+body.portaflow-redesign h2 { font-size: 15px; line-height: 1.35; font-weight: 600; }
+body.portaflow-redesign h3 { font-size: 14px; line-height: 1.4; font-weight: 600; }
+body.portaflow-redesign p { margin: 0; }
+
+body.portaflow-redesign .muted { color: var(--pf-muted); }
+body.portaflow-redesign .fine-print,
+body.portaflow-redesign .field-help { color: var(--pf-muted); font-size: 12px; line-height: 1.45; }
+
+/* ===================== Shell ===================== */
+body.portaflow-redesign .app-shell { min-height: 100vh; background: var(--pf-canvas); }
+
+body.portaflow-redesign .sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 40;
+  width: var(--pf-sidebar-w);
+  display: flex;
+  flex-direction: column;
+  background: var(--pf-sidebar);
+  border-right: 1px solid var(--pf-rule);
+  padding: 14px 10px 12px;
+  overflow-y: auto;
+  box-shadow: none;
+}
+
+body.portaflow-redesign .brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  padding: 4px 8px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--pf-ink);
+  background: none;
+}
+body.portaflow-redesign .brand-period { color: var(--pf-accent); }
+
+body.portaflow-redesign .workspace-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--pf-rule-strong);
+  border-radius: var(--pf-radius);
+  background: var(--pf-surface);
+  color: var(--pf-ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: none;
+}
+body.portaflow-redesign .workspace-select:hover { border-color: var(--pf-faint); }
+body.portaflow-redesign .workspace-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-ink);
+  color: var(--pf-surface);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+body.portaflow-redesign .nav-section-label {
+  margin: 14px 0 4px;
+  padding: 0 8px;
+  color: var(--pf-faint);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.portaflow-redesign .menu { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+body.portaflow-redesign .menu a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: var(--pf-radius-sm);
+  color: var(--pf-ink-2);
+  font-size: 14px;
+  font-weight: 450;
+  text-decoration: none;
+  background: transparent;
+}
+body.portaflow-redesign .menu a svg { width: 15px; height: 15px; flex: none; color: var(--pf-faint); }
+body.portaflow-redesign .menu a:hover { background: var(--pf-sidebar-hover); color: var(--pf-ink); text-decoration: none; }
+body.portaflow-redesign .menu a.nav-active,
+body.portaflow-redesign .menu .nav-active > a,
+body.portaflow-redesign .menu a[aria-current="page"] {
+  background: var(--pf-surface);
+  color: var(--pf-ink);
+  font-weight: 550;
+  box-shadow: inset 0 0 0 1px var(--pf-rule);
+}
+body.portaflow-redesign .menu a.nav-active svg { color: var(--pf-accent); }
+body.portaflow-redesign .nav-count {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--pf-accent-weak);
+  color: var(--pf-accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+body.portaflow-redesign .sidebar-bottom {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--pf-rule);
+  display: grid;
+  gap: 8px;
+}
+body.portaflow-redesign .sidebar-note { display: none !important; }
+body.portaflow-redesign .nav-secondary { display: grid; gap: 0; list-style: none; margin: 0; padding: 0; }
+body.portaflow-redesign .nav-secondary a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--pf-radius-sm);
+  color: var(--pf-muted);
+  font-size: 12px;
+}
+body.portaflow-redesign .nav-secondary a svg { width: 13px; height: 13px; }
+body.portaflow-redesign .nav-secondary a:hover { color: var(--pf-ink); background: var(--pf-sidebar-hover); text-decoration: none; }
+body.portaflow-redesign .sidebar-network {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  color: var(--pf-muted);
+  font-size: 12px;
+}
+body.portaflow-redesign .connection-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--pf-ok);
+  box-shadow: none;
+  animation: none !important;
+}
+body.portaflow-redesign .connection-dot.offline { background: var(--pf-faint); }
+
+body.portaflow-redesign .sidebar-backdrop { display: none; }
+
+body.portaflow-redesign .workspace {
+  margin-left: var(--pf-sidebar-w);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+body.portaflow-redesign .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--pf-topbar-h);
+  padding: 0 28px;
+  background: var(--pf-canvas);
+  border-bottom: 1px solid var(--pf-rule);
+  backdrop-filter: none;
+  box-shadow: none;
+}
+body.portaflow-redesign .breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--pf-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.portaflow-redesign .breadcrumbs strong,
+body.portaflow-redesign .breadcrumbs [aria-current] { color: var(--pf-ink); font-weight: 500; }
+body.portaflow-redesign .breadcrumbs .sep { color: var(--pf-rule-strong); }
+body.portaflow-redesign .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+body.portaflow-redesign .testnet-label {
+  padding: 2px 7px;
+  border: 1px solid var(--pf-rule-strong);
+  border-radius: 3px;
+  color: var(--pf-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  background: transparent;
+}
+body.portaflow-redesign .wallet-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--pf-rule-strong);
+  border-radius: var(--pf-radius);
+  background: var(--pf-surface);
+  color: var(--pf-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: none;
+}
+body.portaflow-redesign .wallet-button:hover { border-color: var(--pf-faint); }
+body.portaflow-redesign .wallet-button .op-monospace { font-size: 12px; }
+
+body.portaflow-redesign main {
+  flex: 1;
+  width: 100%;
+  max-width: 1240px;
+  padding: 28px 28px 48px;
+  min-width: 0;
+}
+
+body.portaflow-redesign .page-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 22px;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+body.portaflow-redesign .page-heading p { margin-top: 4px; color: var(--pf-muted); font-size: 14px; max-width: 64ch; }
+body.portaflow-redesign .eyebrow {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--pf-faint);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+body.portaflow-redesign .heading-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+
+body.portaflow-redesign .workspace-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 14px 28px;
+  border-top: 1px solid var(--pf-rule);
+  color: var(--pf-faint);
+  font-size: 12px;
+}
+
+/* ===================== Buttons ===================== */
+body.portaflow-redesign .btn,
+body.portaflow-redesign [data-slot="button"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--pf-rule-strong);
+  border-radius: var(--pf-radius);
+  background: var(--pf-surface);
+  color: var(--pf-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none;
+  text-decoration: none;
+  transition: background-color 80ms linear, border-color 80ms linear;
+}
+body.portaflow-redesign .btn svg,
+body.portaflow-redesign [data-slot="button"] svg { width: 14px; height: 14px; }
+body.portaflow-redesign .btn:hover { border-color: var(--pf-faint); text-decoration: none; }
+body.portaflow-redesign .btn:disabled,
+body.portaflow-redesign .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+body.portaflow-redesign .btn-primary {
+  background: var(--pf-accent);
+  border-color: var(--pf-accent);
+  color: var(--pf-accent-ink);
+}
+body.portaflow-redesign .btn-primary:hover { background: var(--pf-accent-hover); border-color: var(--pf-accent-hover); }
+body.portaflow-redesign .btn-outline { background: var(--pf-surface); }
+body.portaflow-redesign .btn-ghost { background: transparent; border-color: transparent; color: var(--pf-ink-2); }
+body.portaflow-redesign .btn-ghost:hover { background: var(--pf-sidebar); border-color: transparent; }
+body.portaflow-redesign .btn-danger { color: var(--pf-err); }
+body.portaflow-redesign .icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--pf-radius);
+  background: transparent;
+  color: var(--pf-ink-2);
+  cursor: pointer;
+}
+body.portaflow-redesign .icon-button svg { width: 16px; height: 16px; }
+body.portaflow-redesign .icon-button:hover { background: var(--pf-sidebar); }
+body.portaflow-redesign .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pf-accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+body.portaflow-redesign .text-button.quiet { color: var(--pf-muted); font-weight: 400; font-size: 12px; }
+body.portaflow-redesign .text-button svg { width: 13px; height: 13px; }
+body.portaflow-redesign .text-button:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ===================== Money ===================== */
+body.portaflow-redesign .money,
+body.portaflow-redesign .op-money {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  white-space: nowrap;
+  color: var(--pf-ink);
+}
+body.portaflow-redesign .unit { margin-left: 3px; color: var(--pf-muted); font-size: 0.8em; font-weight: 400; }
+body.portaflow-redesign .money-big {
+  display: block;
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--pf-ink);
+}
+body.portaflow-redesign .money-big .unit { font-size: 15px; }
+body.portaflow-redesign .op-monospace,
+body.portaflow-redesign .full-address,
+body.portaflow-redesign .op-hash code,
+body.portaflow-redesign code {
+  font-family: var(--pf-mono);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+/* ===================== Stats / summary strip ===================== */
+body.portaflow-redesign .stats-strip,
+body.portaflow-redesign .funding-summary,
+body.portaflow-redesign .op-round-totals,
+body.portaflow-redesign .op-metrics {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.6fr) repeat(3, minmax(0, 1fr));
+  margin: 0 0 28px;
+  padding: 0;
+  border-top: 1px solid var(--pf-rule);
+  border-bottom: 1px solid var(--pf-rule);
+  background: transparent;
+  gap: 0;
+}
+body.portaflow-redesign .op-round-totals,
+body.portaflow-redesign .op-metrics { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+body.portaflow-redesign .stat-item {
+  padding: 16px 20px;
+  border: 0;
+  border-left: 1px solid var(--pf-rule);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  min-width: 0;
+}
+body.portaflow-redesign .stat-item:first-child { border-left: 0; padding-left: 0; }
+body.portaflow-redesign .stat-item > span:first-child,
+body.portaflow-redesign .stat-item .stat-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--pf-muted);
+  font-size: 12px;
+}
+body.portaflow-redesign .stat-item strong,
+body.portaflow-redesign .stat-item .money {
+  font-size: 18px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+body.portaflow-redesign .stat-item small { display: block; margin-top: 4px; color: var(--pf-faint); font-size: 12px; }
+
+/* ===================== Panels ===================== */
+body.portaflow-redesign .panel,
+body.portaflow-redesign .op-card,
+body.portaflow-redesign [data-slot="card"] {
+  background: var(--pf-surface);
+  border: 1px solid var(--pf-rule);
+  border-radius: var(--pf-radius);
+  box-shadow: none;
+  padding: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+/* Kill nested-card look */
+body.portaflow-redesign .panel .panel,
+body.portaflow-redesign .op-card .op-card { border: 0; border-top: 1px solid var(--pf-rule); border-radius: 0; }
+body.portaflow-redesign .panel-heading,
+body.portaflow-redesign .op-card-heading,
+body.portaflow-redesign [data-slot="card-header"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--pf-rule);
+  background: transparent;
+}
+body.portaflow-redesign .panel-heading p,
+body.portaflow-redesign .op-card-heading p { color: var(--pf-muted); font-size: 12px; }
+body.portaflow-redesign [data-slot="card-title"] { font-size: 15px; font-weight: 600; }
+body.portaflow-redesign [data-slot="card-description"] { color: var(--pf-muted); font-size: 12px; }
+body.portaflow-redesign [data-slot="card-content"],
+body.portaflow-redesign .panel-body { padding: 14px 16px; }
+body.portaflow-redesign .panel-footnote {
+  padding: 10px 16px;
+  border-top: 1px solid var(--pf-rule);
+  color: var(--pf-muted);
+  font-size: 12px;
+  background: transparent;
+}
+
+/* ===================== Layout grids ===================== */
+body.portaflow-redesign .overview-grid,
+body.portaflow-redesign .detail-grid,
+body.portaflow-redesign .op-detail-grid,
+body.portaflow-redesign .treasury-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+body.portaflow-redesign .detail-main,
+body.portaflow-redesign .op-stack { display: grid; gap: 20px; min-width: 0; }
+body.portaflow-redesign .detail-aside { display: grid; gap: 16px; min-width: 0; position: sticky; top: calc(var(--pf-topbar-h) + 20px); }
+body.portaflow-redesign .op-two-col,
+body.portaflow-redesign .form-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+body.portaflow-redesign .form-split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+body.portaflow-redesign .op-full { grid-column: 1 / -1; }
+
+/* ===================== Tables ===================== */
+body.portaflow-redesign .table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+body.portaflow-redesign .table,
+body.portaflow-redesign .award-table,
+body.portaflow-redesign [data-slot="table"] {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+body.portaflow-redesign .table-scroll > .table,
+body.portaflow-redesign .table-scroll > .award-table { min-width: 640px; }
+body.portaflow-redesign .table th,
+body.portaflow-redesign .award-table th,
+body.portaflow-redesign [data-slot="table-head"] {
+  height: 34px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--pf-rule);
+  background: transparent;
+  color: var(--pf-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+body.portaflow-redesign .table td,
+body.portaflow-redesign .award-table td,
+body.portaflow-redesign [data-slot="table-cell"] {
+  height: 46px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--pf-rule);
+  color: var(--pf-ink);
+  vertical-align: middle;
+}
+body.portaflow-redesign .table tbody tr:last-child td,
+body.portaflow-redesign .award-table tbody tr:last-child td { border-bottom: 0; }
+body.portaflow-redesign .table tbody tr:hover td,
+body.portaflow-redesign .award-table tbody tr:hover td,
+body.portaflow-redesign [data-slot="table-row"]:hover { background: var(--pf-row-hover); }
+body.portaflow-redesign .table tr.is-link { cursor: pointer; }
+body.portaflow-redesign .table .num,
+body.portaflow-redesign .table th.num,
+body.portaflow-redesign .award-table .num { text-align: right; }
+body.portaflow-redesign .table .row-arrow { width: 36px; color: var(--pf-faint); text-align: right; }
+body.portaflow-redesign .table .row-arrow svg { width: 14px; height: 14px; vertical-align: middle; }
+body.portaflow-redesign .row-title,
+body.portaflow-redesign .op-row-title,
+body.portaflow-redesign .op-payment-name { display: block; color: var(--pf-ink); font-weight: 500; }
+body.portaflow-redesign a.row-title:hover,
+body.portaflow-redesign a.op-row-title:hover { color: var(--pf-accent); }
+body.portaflow-redesign .row-file,
+body.portaflow-redesign .schedule-label {
+  display: block;
+  margin-top: 1px;
+  color: var(--pf-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+body.portaflow-redesign .op-release-cell { display: grid; gap: 1px; font-size: 13px; }
+body.portaflow-redesign .op-release-cell small { color: var(--pf-muted); font-size: 12px; }
+body.portaflow-redesign .op-total td { font-weight: 600; background: var(--pf-row-hover); border-top: 1px solid var(--pf-rule-strong); }
+body.portaflow-redesign .op-evidence { color: var(--pf-muted); font-size: 12px; }
+
+/* ===================== Status ===================== */
+body.portaflow-redesign .award-status,
+body.portaflow-redesign .op-status,
+body.portaflow-redesign [data-slot="badge"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 7px 1px 6px;
+  border: 1px solid var(--pf-rule-strong);
+  border-radius: 3px;
+  background: var(--pf-surface);
+  color: var(--pf-ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  box-shadow: none;
+}
+body.portaflow-redesign .status-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--pf-faint);
+  animation: none !important;
+  box-shadow: none;
+}
+body.portaflow-redesign .status-funded,
+body.portaflow-redesign .status-paid,
+body.portaflow-redesign .award-status.paid { color: var(--pf-ok); border-color: #c7dfd2; background: var(--pf-ok-weak); }
+body.portaflow-redesign .status-funded .status-dot,
+body.portaflow-redesign .status-paid .status-dot,
+body.portaflow-redesign .award-status.paid .status-dot { background: var(--pf-ok); }
+body.portaflow-redesign .status-awaiting_approval,
+body.portaflow-redesign .award-status.pending { color: var(--pf-warn); border-color: #ecd9ad; background: var(--pf-warn-weak); }
+body.portaflow-redesign .status-awaiting_approval .status-dot,
+body.portaflow-redesign .award-status.pending .status-dot { background: #c18a12; }
+body.portaflow-redesign .status-draft .status-dot { background: var(--pf-faint); }
+body.portaflow-redesign .status-failed { color: var(--pf-err); border-color: #eec5c0; background: var(--pf-err-weak); }
+body.portaflow-redesign .status-failed .status-dot { background: var(--pf-err); }
+
+/* ===================== Filters / tabs ===================== */
+body.portaflow-redesign .op-filter,
+body.portaflow-redesign [data-slot="tabs-list"] {
+  display: inline-flex;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--pf-rule);
+  border-radius: var(--pf-radius);
+  background: var(--pf-sidebar);
+}
+body.portaflow-redesign .op-filter button,
+body.portaflow-redesign [data-slot="tabs-trigger"] {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--pf-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: none;
+}
+body.portaflow-redesign .op-filter button[aria-pressed="true"],
+body.portaflow-redesign .op-filter button.active,
+body.portaflow-redesign [data-slot="tabs-trigger"][data-state="active"] {
+  background: var(--pf-surface);
+  color: var(--pf-ink);
+  box-shadow: 0 0 0 1px var(--pf-rule);
+}
+body.portaflow-redesign .op-filter .count { margin-left: 5px; color: var(--pf-faint); font-variant-numeric: tabular-nums; }
+
+/* ===================== Details / lists ===================== */
+body.portaflow-redesign .compact-details,
+body.portaflow-redesign .review-details { margin: 0; padding: 0; }
+body.portaflow-redesign .compact-details > div,
+body.portaflow-redesign .op-summary-row,
+body.portaflow-redesign .review-details > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--pf-rule);
+  font-size: 13px;
+}
+body.portaflow-redesign .compact-details > div:last-child,
+body.portaflow-redesign .op-summary-row:last-child,
+body.portaflow-redesign .review-details > div:last-child { border-bottom: 0; }
+body.portaflow-redesign .compact-details dt,
+body.portaflow-redesign .review-details dt,
+body.portaflow-redesign .op-summary-row > :first-child { color: var(--pf-muted); flex: none; }
+body.portaflow-redesign .compact-details dd,
+body.portaflow-redesign .review-details dd { margin: 0; text-align: right; min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+body.portaflow-redesign .signer-row,
+body.portaflow-redesign .recipient-row,
+body.portaflow-redesign .schedule-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--pf-rule);
+  min-width: 0;
+  background: transparent;
+}
+body.portaflow-redesign .signer-row:last-child,
+body.portaflow-redesign .recipient-row:last-child,
+body.portaflow-redesign .schedule-row:last-child { border-bottom: 0; }
+body.portaflow-redesign .signer-row > div,
+body.portaflow-redesign .recipient-row > div { min-width: 0; flex: 1; }
+body.portaflow-redesign .person-avatar,
+body.portaflow-redesign .op-signer-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--pf-sidebar);
+  border: 1px solid var(--pf-rule);
+  color: var(--pf-ink-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+body.portaflow-redesign .op-signer-icon.signed { background: var(--pf-ok-weak); border-color: #c7dfd2; color: var(--pf-ok); }
+body.portaflow-redesign .op-signer-icon svg { width: 13px; height: 13px; }
+body.portaflow-redesign .op-signers { display: grid; }
+body.portaflow-redesign .full-address {
+  display: block;
+  color: var(--pf-muted);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  line-height: 1.45;
+}
+body.portaflow-redesign .address-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--pf-rule);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-canvas);
+  font-family: var(--pf-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+body.portaflow-redesign .schedule-list { display: grid; }
+body.portaflow-redesign .vesting-body { padding: 14px 16px; display: grid; gap: 10px; }
+body.portaflow-redesign .release-illustration { display: none !important; }
+
+body.portaflow-redesign .schedule-empty,
+body.portaflow-redesign .empty-state,
+body.portaflow-redesign .op-empty {
+  padding: 28px 16px;
+  color: var(--pf-muted);
+  font-size: 13px;
+  text-align: center;
+  background: transparent;
+  border: 0;
+}
+body.portaflow-redesign .empty-state h3,
+body.portaflow-redesign .op-empty h3 { margin-bottom: 4px; }
+
+/* Explainer / hash / notices */
+body.portaflow-redesign .op-explainer {
+  padding: 12px 16px;
+  color: var(--pf-ink-2);
+  font-size: 13px;
+  line-height: 1.55;
+  border-top: 1px solid var(--pf-rule);
+}
+body.portaflow-redesign .op-explainer:first-child { border-top: 0; }
+body.portaflow-redesign .op-hash {
+  display: grid;
+  gap: 6px;
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--pf-muted);
+}
+body.portaflow-redesign .op-hash code {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid var(--pf-rule);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-canvas);
+  color: var(--pf-ink);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+body.portaflow-redesign .warning-notice,
+body.portaflow-redesign .network-notice,
+body.portaflow-redesign .op-notice,
+body.portaflow-redesign .alert {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0 0 20px;
+  padding: 10px 12px;
+  border: 1px solid var(--pf-rule);
+  border-left: 3px solid var(--pf-faint);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-surface);
+  color: var(--pf-ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+body.portaflow-redesign .warning-notice svg,
+body.portaflow-redesign .network-notice svg,
+body.portaflow-redesign .op-notice svg,
+body.portaflow-redesign .alert svg { width: 15px; height: 15px; flex: none; margin-top: 2px; }
+body.portaflow-redesign .warning-notice { border-left-color: #c18a12; background: var(--pf-warn-weak); }
+body.portaflow-redesign .network-notice { border-left-color: var(--pf-accent); }
+body.portaflow-redesign .error-alert { border-left-color: var(--pf-err); background: var(--pf-err-weak); color: var(--pf-err); }
+
+body.portaflow-redesign .op-coverage { display: grid; gap: 6px; padding: 12px 16px; font-size: 12px; color: var(--pf-muted); }
+body.portaflow-redesign [data-slot="progress"],
+body.portaflow-redesign .op-coverage .bar {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--pf-rule);
+}
+body.portaflow-redesign [data-slot="progress-indicator"],
+body.portaflow-redesign .op-coverage .bar > span {
+  display: block;
+  height: 100%;
+  background: var(--pf-accent);
+  transition: none;
+}
+
+body.portaflow-redesign .op-direction {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pf-muted);
+}
+body.portaflow-redesign .op-direction svg { width: 13px; height: 13px; }
+body.portaflow-redesign .op-direction.incoming { color: var(--pf-ok); }
+body.portaflow-redesign .op-direction.outgoing { color: var(--pf-ink-2); }
+body.portaflow-redesign .op-immediate { color: var(--pf-ink); }
+body.portaflow-redesign .op-block { font-family: var(--pf-mono); font-size: 12px; color: var(--pf-muted); }
+
+/* ===================== Forms ===================== */
+body.portaflow-redesign .field-label,
+body.portaflow-redesign label.field-label {
+  display: block;
+  margin: 0 0 5px;
+  color: var(--pf-ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+body.portaflow-redesign .input,
+body.portaflow-redesign .select,
+body.portaflow-redesign [data-slot="input"],
+body.portaflow-redesign textarea.input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--pf-rule-strong);
+  border-radius: var(--pf-radius);
+  background: var(--pf-surface);
+  color: var(--pf-ink);
+  font: inherit;
+  font-size: 14px;
+  box-shadow: none;
+  text-overflow: ellipsis;
+}
+body.portaflow-redesign textarea.input { height: auto; min-height: 80px; padding: 8px 10px; }
+body.portaflow-redesign .input.op-monospace { font-family: var(--pf-mono); font-size: 12.5px; }
+body.portaflow-redesign .input::placeholder { color: var(--pf-faint); }
+body.portaflow-redesign .input:focus,
+body.portaflow-redesign .select:focus,
+body.portaflow-redesign [data-slot="input"]:focus {
+  outline: none;
+  border-color: var(--pf-accent);
+  box-shadow: 0 0 0 3px var(--pf-accent-weak);
+}
+body.portaflow-redesign .commitment-checkbox {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--pf-rule);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-canvas);
+  font-size: 13px;
+}
+body.portaflow-redesign .commitment-checkbox input { margin-top: 3px; accent-color: var(--pf-accent); }
+
+body.portaflow-redesign .op-address-search {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-bottom: 24px;
+  max-width: 720px;
+}
+body.portaflow-redesign .op-address-search > div { flex: 1; min-width: 0; }
+
+body.portaflow-redesign .op-payment-editor { display: grid; border: 1px solid var(--pf-rule); border-radius: var(--pf-radius); overflow: hidden; }
+body.portaflow-redesign .op-payment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--pf-rule);
+}
+body.portaflow-redesign .op-payment-row:last-child { border-bottom: 0; }
+body.portaflow-redesign .op-row-controls { display: flex; gap: 4px; }
+body.portaflow-redesign .op-import-preview,
+body.portaflow-redesign .op-review-payments { border: 1px solid var(--pf-rule); border-radius: var(--pf-radius); overflow: auto; max-height: 260px; }
+body.portaflow-redesign .import-file {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 28px 16px;
+  border: 1px dashed var(--pf-rule-strong);
+  border-radius: var(--pf-radius);
+  background: var(--pf-canvas);
+  color: var(--pf-muted);
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+}
+body.portaflow-redesign .import-file:hover { border-color: var(--pf-accent); }
+body.portaflow-redesign .import-file svg { width: 20px; height: 20px; color: var(--pf-faint); }
+body.portaflow-redesign .import-file strong { color: var(--pf-ink); font-weight: 500; }
+
+/* ===================== Unlock / My funds ===================== */
+body.portaflow-redesign .op-unlock-card,
+body.portaflow-redesign .unlock-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 20px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid var(--pf-rule);
+  border-radius: var(--pf-radius);
+  background: var(--pf-surface);
+  margin-bottom: 24px;
+}
+body.portaflow-redesign .op-unlock-card p { color: var(--pf-muted); font-size: 12px; margin-top: 2px; }
+
+/* ===================== Verifier ===================== */
+body.portaflow-redesign .op-verifier { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; max-width: 960px; }
+body.portaflow-redesign .op-checks { list-style: none; margin: 0; padding: 0; }
+body.portaflow-redesign .op-checks li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--pf-rule);
+  font-size: 13px;
+}
+body.portaflow-redesign .op-checks li:last-child { border-bottom: 0; }
+body.portaflow-redesign .op-checks li svg { width: 16px; height: 16px; margin-top: 2px; }
+body.portaflow-redesign .op-checks li.pass svg { color: var(--pf-ok); }
+body.portaflow-redesign .op-checks li.fail svg { color: var(--pf-err); }
+body.portaflow-redesign .op-checks li.pending svg { color: var(--pf-faint); }
+body.portaflow-redesign .op-checks small { display: block; color: var(--pf-muted); font-size: 12px; overflow-wrap: anywhere; }
+body.portaflow-redesign .op-checks small code { font-size: 11.5px; }
+body.portaflow-redesign .verify-result { padding: 12px 16px; border-bottom: 1px solid var(--pf-rule); font-size: 13px; font-weight: 500; display: flex; gap: 8px; align-items: center; }
+body.portaflow-redesign .verify-result svg { width: 16px; height: 16px; }
+body.portaflow-redesign .verify-result.ok { color: var(--pf-ok); background: var(--pf-ok-weak); }
+body.portaflow-redesign .verify-result.bad { color: var(--pf-err); background: var(--pf-err-weak); }
+
+/* ===================== Dialogs ===================== */
+body.portaflow-redesign [data-slot="dialog-overlay"],
+body.portaflow-redesign .pf-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(27, 28, 30, 0.32);
+  backdrop-filter: none;
+  animation: none !important;
+}
+body.portaflow-redesign .pf-dialog,
+body.portaflow-redesign [data-slot="dialog-content"] {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 61;
+  transform: none;
+  translate: -50% -50%;
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 0;
+  border: 1px solid var(--pf-rule-strong);
+  border-radius: 6px;
+  background: var(--pf-surface);
+  color: var(--pf-ink);
+  font-family: var(--pf-font);
+  font-size: 14px;
+  box-shadow: 0 12px 32px rgba(27, 28, 30, 0.14);
+  animation: none !important;
+}
+body.portaflow-redesign [data-slot="dialog-content"]:hover,
+body.portaflow-redesign .pf-dialog:hover { transform: none; }
+body.portaflow-redesign .pf-dialog-wide { width: min(880px, calc(100vw - 24px)); }
+body.portaflow-redesign .modal-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--pf-rule);
+}
+body.portaflow-redesign .modal-heading h2 { font-size: 17px; }
+body.portaflow-redesign .modal-heading p { margin-top: 2px; color: var(--pf-muted); font-size: 13px; }
+body.portaflow-redesign .modal-body { display: grid; gap: 16px; padding: 18px 20px; }
+body.portaflow-redesign .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--pf-rule);
+  background: var(--pf-canvas);
+}
+body.portaflow-redesign .modal-footer .fine-print { margin-right: auto; }
+body.portaflow-redesign .review-target { padding: 12px 14px; border: 1px solid var(--pf-rule); border-radius: var(--pf-radius-sm); background: var(--pf-canvas); }
+body.portaflow-redesign .wallet-options { display: grid; gap: 0; border: 1px solid var(--pf-rule); border-radius: var(--pf-radius); overflow: hidden; }
+body.portaflow-redesign .wallet-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--pf-rule);
+  background: var(--pf-surface);
+  color: var(--pf-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+body.portaflow-redesign .wallet-option:last-child { border-bottom: 0; }
+body.portaflow-redesign .wallet-option:hover { background: var(--pf-row-hover); }
+
+/* Toast */
+body.portaflow-redesign .toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 70;
+  max-width: 360px;
+  padding: 10px 14px;
+  border: 1px solid var(--pf-rule-strong);
+  border-radius: var(--pf-radius);
+  background: var(--pf-ink);
+  color: var(--pf-surface);
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(27, 28, 30, 0.18);
+  animation: none !important;
+}
+
+/* Mobile-only controls */
+body.portaflow-redesign .menu-toggle { display: none; }
+
+/* ===================== Responsive ===================== */
+@media (max-width: 1080px) {
+  body.portaflow-redesign .overview-grid,
+  body.portaflow-redesign .detail-grid,
+  body.portaflow-redesign .op-detail-grid,
+  body.portaflow-redesign .treasury-grid { grid-template-columns: minmax(0, 1fr); }
+  body.portaflow-redesign .detail-aside { position: static; }
+  body.portaflow-redesign .stats-strip,
+  body.portaflow-redesign .funding-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.portaflow-redesign .stats-strip .stat-item:nth-child(3) { border-left: 0; padding-left: 0; }
+  body.portaflow-redesign .stats-strip .stat-item:nth-child(n + 3) { border-top: 1px solid var(--pf-rule); }
+  body.portaflow-redesign .op-verifier { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 720px) {
+  body.portaflow-redesign .sidebar {
+    transform: translateX(-100%);
+    transition: transform 160ms ease;
+    box-shadow: none;
+  }
+  body.portaflow-redesign .navigation-open .sidebar {
+    transform: translateX(0);
+    box-shadow: 0 0 0 1px var(--pf-rule), 8px 0 24px rgba(27, 28, 30, 0.12);
+  }
+  body.portaflow-redesign .navigation-open .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    background: rgba(27, 28, 30, 0.28);
+  }
+  body.portaflow-redesign .workspace { margin-left: 0; }
+  body.portaflow-redesign .menu-toggle { display: inline-grid; margin-left: -6px; }
+  body.portaflow-redesign .topbar { padding: 0 14px; gap: 6px; }
+  body.portaflow-redesign .testnet-label,
+  body.portaflow-redesign .topbar .refresh-label { display: none; }
+  body.portaflow-redesign main { padding: 20px 14px 36px; }
+  body.portaflow-redesign h1 { font-size: 24px; }
+  body.portaflow-redesign .page-heading { flex-direction: column; align-items: stretch; }
+  body.portaflow-redesign .heading-actions { justify-content: flex-start; flex-wrap: wrap; }
+  body.portaflow-redesign .stats-strip,
+  body.portaflow-redesign .funding-summary { grid-template-columns: minmax(0, 1fr); }
+  body.portaflow-redesign .stats-strip .stat-item { border-left: 0; padding-left: 0; border-top: 1px solid var(--pf-rule); }
+  body.portaflow-redesign .stats-strip .stat-item:first-child { border-top: 0; }
+  body.portaflow-redesign .op-round-totals,
+  body.portaflow-redesign .op-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.portaflow-redesign .op-round-totals .stat-item,
+  body.portaflow-redesign .op-metrics .stat-item { padding-left: 12px; }
+  body.portaflow-redesign .op-two-col,
+  body.portaflow-redesign .form-columns,
+  body.portaflow-redesign .form-split { grid-template-columns: minmax(0, 1fr); }
+  body.portaflow-redesign .op-address-search { flex-direction: column; align-items: stretch; }
+  body.portaflow-redesign .op-unlock-card,
+  body.portaflow-redesign .unlock-box { grid-template-columns: minmax(0, 1fr); }
+  body.portaflow-redesign .op-payment-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  body.portaflow-redesign .workspace-footer { padding: 12px 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.portaflow-redesign .sidebar { transition: none; }
+}
