@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { NETWORK, type Award, type Treasury } from '../shared/types.js';
+import { NETWORK, type Award, type Treasury, type PayoutRound, type Receipt, type TreasuryLedger } from '../shared/types.js';
 import { parseAmount, schedule, vestedRemaining } from '../shared/money.js';
 import { createChallenge, normalizeAddress, sessionHash, treasuryIdentity, verifyChallenge } from './identity.js';
 import { createStore, type DataStore } from './store.js';
@@ -77,6 +77,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
   app.get('/api/health', async () => ({ ok: true, name: 'PortaFlow', network: chain.state }));
   app.get('/api/overview', async request => ({
     network: chain.state, treasuries: await store.list<Treasury>('treasuries'), awards: await store.list<Award>('awards'),
+    rounds: await store.list<PayoutRound>('rounds'),
     session: (request as any).walletAddress ? { address: (request as any).walletAddress } : null,
   }));
   app.post('/api/auth/challenge', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async request => {
@@ -104,7 +105,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     if (!identity.signatories.includes(creator)) throw new Error('Your connected wallet must be a treasury signer.');
     if ((await store.list<Treasury>('treasuries')).some(t => t.address === identity.address)) throw new Error('This signer configuration already has a treasury in PortaFlow.');
     const treasury: Treasury = { id: randomUUID(), name: text(data.name, 'Treasury name', 60), creator,
-      threshold: data.threshold, ...identity, createdAt: new Date().toISOString() };
+      threshold: data.threshold, ...identity, createdAt: new Date().toISOString(), createdBlock: chain.state.finalizedBlock || undefined };
     await store.saveTreasury(treasury);
     return treasury;
   });
@@ -120,7 +121,8 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     const total = parseAmount(text(data.amount, 'Award amount', 45));
     const upfront = data.upfront === '0' ? 0n : parseAmount(text(data.upfront, 'Upfront amount', 45));
     const locked = total - upfront;
-    if (locked < BigInt(chain.state.minVestedRaw)) throw new Error('The vested portion must be at least ' + (BigInt(chain.state.minVestedRaw) / 100_000_000_000_000n) + ' tPOT.');
+    if (locked < 0n) throw new Error('Immediate payment cannot exceed the total award.');
+    if (locked > 0n && locked < BigInt(chain.state.minVestedRaw)) throw new Error('The vested portion must be at least ' + (BigInt(chain.state.minVestedRaw) / 100_000_000_000_000n) + ' tPOT. Use 100% immediate for smaller payments.');
     const recipient = normalizeAddress(data.recipient);
     if (recipient === treasury.address) throw new Error('A treasury cannot award a grant to itself.');
     const delay = integer(data.startDelayBlocks, 'Start delay', 5, 5_000_000);
@@ -133,7 +135,8 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     }
     const award: Award = { id: randomUUID(), treasuryId: treasury.id, title: text(data.title, 'Award title', 100),
       recipient, workUrl, totalRaw: total.toString(), upfrontRaw: upfront.toString(), lockedRaw: locked.toString(),
-      startBlock, ...schedule(locked, duration, startBlock), createdAt: new Date().toISOString(), createdBy: creator,
+      startBlock: locked > 0n ? startBlock : 0,
+      ...(locked > 0n ? schedule(locked, duration, startBlock) : { perBlockRaw: '0', durationBlocks: 0, endBlock: 0 }), createdAt: new Date().toISOString(), createdBy: creator,
       createdBlock: chain.state.finalizedBlock, status: 'draft' };
     return award;
   }
@@ -170,7 +173,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
       ? vestedRemaining(BigInt(award.lockedRaw), BigInt(award.perBlockRaw), award.startBlock, chain.state.finalizedBlock) : BigInt(award.lockedRaw);
     return { award, treasury, pending, wallet, remainingRaw: remaining.toString(),
       vestedRaw: (BigInt(award.lockedRaw) - remaining).toString(), receipts: await store.receipts(award.id),
-      reviewRequired: Boolean(award.callHex && award.specVersion !== chain.state.specVersion) || chain.state.bestBlock >= award.startBlock && award.status !== 'funded' };
+      reviewRequired: Boolean(award.callHex && award.specVersion !== chain.state.specVersion) || BigInt(award.lockedRaw) > 0n && chain.state.bestBlock >= award.startBlock && award.status !== 'funded' };
   });
   app.post('/api/awards/:id/approval-plan', async request => {
     const signer = auth(request);
@@ -214,6 +217,71 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     }
     await chain.refresh();
     return chain.state;
+  });
+  async function getRound(roundId: string) {
+    const round = await store.round(roundId);
+    if (!round) throw Object.assign(new Error('Payout round not found.'), { statusCode: 404 });
+    return round;
+  }
+  app.post('/api/rounds', async request => {
+    const creator = auth(request), data = body(request.body);
+    await chain.refreshHead();
+    const treasury = await getTreasury(text(data.treasuryId, 'Treasury'));
+    if (!treasury.signatories.includes(creator)) throw new Error('Only treasury signers can create payout rounds.');
+    const delay = integer(data.startDelayBlocks ?? Math.round(3600 / chain.state.blockSeconds), 'Start delay', 10, 5_000_000);
+    const rows = typeof data.csv === 'string' ? readAwardCsv(data.csv).map(row => ({ ...row,
+      durationBlocks: Math.round(row.durationDays * 86400 / chain.state.blockSeconds) })) : data.payments;
+    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 25) throw new Error('A round needs between 1 and 25 payments.');
+    const awards: Award[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      try { awards.push(await makeAward({ ...body(rows[i]), treasuryId: treasury.id, startDelayBlocks: delay,
+        acceptedCommitment: data.acceptedCommitment }, creator)); }
+      catch (error) { throw new Error('Payment ' + (i + 1) + ': ' + (error instanceof Error ? error.message : 'Invalid payment.')); }
+    }
+    const round: PayoutRound = { id: randomUUID(), treasuryId: treasury.id, title: text(data.title, 'Round title', 100),
+      awards, totalRaw: awards.reduce((s, a) => s + BigInt(a.totalRaw), 0n).toString(),
+      upfrontRaw: awards.reduce((s, a) => s + BigInt(a.upfrontRaw), 0n).toString(),
+      lockedRaw: awards.reduce((s, a) => s + BigInt(a.lockedRaw), 0n).toString(),
+      createdAt: new Date().toISOString(), createdBy: creator, createdBlock: chain.state.finalizedBlock, startDelayBlocks: delay, status: 'draft' };
+    await store.saveRound(round);
+    return round;
+  });
+  app.get('/api/rounds/:id', async request => {
+    const round = await getRound(id(request));
+    const treasury = await getTreasury(round.treasuryId);
+    return { round, treasury, pending: chain.state.connected ? await chain.pending(treasury, round) : null,
+      receipts: await store.receipts(round.id), reviewRequired: Boolean(round.callHex && (round.specVersion !== chain.state.specVersion
+        || round.awards.some(a => BigInt(a.lockedRaw) > 0n && chain.state.bestBlock >= a.startBlock))) && round.status !== 'funded' };
+  });
+  app.post('/api/rounds/:id/approval-plan', async request => {
+    const round = await getRound(id(request));
+    const plan = await chain.roundApprovalPlan(round, await getTreasury(round.treasuryId), auth(request));
+    return { ...plan, round: await getRound(round.id) };
+  });
+  app.post('/api/rounds/:id/cancel-plan', async request => {
+    const signer = auth(request);
+    await chain.refresh();
+    const round = await getRound(id(request));
+    const treasury = await getTreasury(round.treasuryId);
+    if (!treasury.signatories.includes(signer)) throw new Error('Only treasury signers can cancel this round.');
+    if (chain.state.lastSyncedBlock < chain.state.finalizedBlock) throw new Error('Finalized history is catching up. Try again shortly.');
+    const owner = randomUUID(), key = 'prepare-round:' + round.id;
+    if (!await store.acquireLease(key, owner, 30_000)) throw new Error('Another signer is preparing this round. Try again shortly.');
+    try {
+      const latest = await getRound(round.id);
+      if (latest.status === 'draft' && !await chain.pending(treasury, latest)) {
+        if (signer !== latest.createdBy) throw new Error('Only the author can discard this draft.');
+        await store.saveRound({ ...latest, status: 'cancelled' });
+        return { cancelled: true };
+      }
+    } finally { await store.releaseLease(key, owner); }
+    return chain.roundApprovalPlan(round, treasury, signer, true);
+  });
+  app.get('/api/rounds/:id/receipt', async (request, reply) => {
+    const round = await getRound(id(request));
+    reply.header('Content-Disposition', 'attachment; filename="portaflow-round-' + round.id + '.json"');
+    return { application: 'PortaFlow', version: 2, network: NETWORK, round,
+      treasury: await getTreasury(round.treasuryId), transactions: await store.receipts(round.id) };
   });
   if (options.serverless && options.connect !== false) {
     app.addHook('preHandler', async request => {

@@ -2,8 +2,8 @@ import type { ApiPromise } from '@polkadot/api';
 import type { Signer } from '@polkadot/api/types';
 import { base64Encode, decodeAddress, encodeAddress, createKeyMulti } from '@polkadot/util-crypto';
 import { stringToHex, u8aToHex } from '@polkadot/util';
-import { fundingCall, transactionFromCall } from '../shared/calls';
-import { NETWORK, type Award, type TransactionPlan, type Treasury } from '../shared/types';
+import { fundingCall, roundFundingCall, transactionFromCall } from '../shared/calls';
+import { NETWORK, type Award, type PayoutRound, type TransactionPlan, type Treasury } from '../shared/types';
 
 export type NativeAccount = { address: string; signingAddress: string; meta: { name?: string; source: string; genesisHash?: string | null } };
 export type NativeProvider = { id: string; name: string };
@@ -113,13 +113,13 @@ async function chainApi() {
     ApiPromise.create({ provider: new WsProvider(NETWORK.rpc), noInitWarn: true })).catch(error => { apiPromise = undefined; throw error; });
   return apiPromise;
 }
-type Context = { award?: Award; treasury?: Treasury; recipient?: string; amountRaw?: string };
+type Context = { award?: Award; round?: PayoutRound; treasury?: Treasury; recipient?: string; amountRaw?: string };
 export function validatePlan(api: ApiPromise, plan: TransactionPlan, context: Context) {
   if (api.genesisHash.toHex() !== NETWORK.genesis || plan.genesis !== NETWORK.genesis) throw new Error('Network verification failed.');
   if (api.runtimeVersion.specVersion.toNumber() !== plan.specVersion) throw new Error('The runtime changed. Refresh this transaction before signing.');
   const decoded: any = transactionFromCall(api, plan.callHex).method;
   const address = (codec: any) => normalize(codec.isId ? codec.asId.toString() : codec.toString());
-  if (context.award && context.treasury && ['approval', 'funding', 'cancellation'].includes(plan.kind)) {
+  if ((context.award || context.round) && context.treasury && ['approval', 'funding', 'cancellation'].includes(plan.kind)) {
     const treasury = context.treasury;
     if (!treasury.signatories.some(a => same(a, plan.signer))) throw new Error('The selected wallet is not a signer of this treasury.');
     const expectedAddress = encodeAddress(createKeyMulti(treasury.signatories, treasury.threshold), 42);
@@ -131,11 +131,11 @@ export function validatePlan(api: ApiPromise, plan: TransactionPlan, context: Co
     if (others.length !== expected.length || others.some((a, i) => !same(a, expected[i]))) throw new Error('The other signers do not match this treasury.');
     // Cancellation must still work after a runtime upgrade, when rebuilding
     // the old proposal with current metadata can produce a different call.
-    const batch = plan.kind === 'cancellation' ? undefined : fundingCall(api, context.award, treasury);
-    const expectedCall = plan.kind === 'cancellation' ? context.award.callHash
+    const batch = plan.kind === 'cancellation' ? undefined : context.round ? roundFundingCall(api, context.round, treasury) : fundingCall(api, context.award!, treasury);
+    const expectedCall = plan.kind === 'cancellation' ? (context.round ?? context.award)!.callHash
       : plan.kind === 'funding' ? batch!.method.toHex() : batch!.method.hash.toHex();
     if (!expectedCall || decoded.args[3].toHex() !== expectedCall) {
-      throw new Error('The encoded payment does not match the award terms displayed.');
+      throw new Error('The encoded payment does not match the terms displayed.');
     }
   } else if (plan.kind === 'treasury funding' && context.treasury) {
     if (decoded.section !== 'balances' || decoded.method !== 'transferKeepAlive' || !same(address(decoded.args[0]), context.treasury.address) || decoded.args[1].toString() !== context.amountRaw) throw new Error('The treasury funding transfer does not match the requested payment.');

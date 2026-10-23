@@ -16,7 +16,9 @@ export function formatAmount(value: string | bigint, digits = 4): string {
   const negative = raw < 0n;
   const positive = negative ? -raw : raw;
   const whole = (positive / UNIT).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  const fraction = (positive % UNIT).toString().padStart(14, '0').slice(0, digits).replace(/0+$/, '');
+  // Small real payments must not be presented as zero.
+  const precision = positive > 0n && positive < UNIT / (10n ** BigInt(digits)) ? 14 : digits;
+  const fraction = (positive % UNIT).toString().padStart(14, '0').slice(0, precision).replace(/0+$/, '');
   return (negative ? '−' : '') + whole + (fraction ? '.' + fraction : '');
 }
 

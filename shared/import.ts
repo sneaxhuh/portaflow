@@ -37,7 +37,7 @@ export function readAwardCsv(source: string): ImportRow[] {
       const total = parseAmount(amount);
       const percentText = get('upfront_percent') || '20';
       const daysText = get('duration_days') || '30';
-      if (!/^\d+$/.test(percentText) || Number(percentText) > 90) throw new Error('Upfront percent must be a whole number between 0 and 90.');
+      if (!/^\d+$/.test(percentText) || Number(percentText) > 100) throw new Error('Upfront percent must be a whole number between 0 and 100.');
       if (!/^\d+$/.test(daysText) || Number(daysText) < 1 || Number(daysText) > 365) throw new Error('Duration must be between 1 and 365 days.');
       const upfront = total * BigInt(percentText) / 100n;
       return { title, recipient, amount, upfront: upfront === 0n ? '0' : (upfront / UNIT).toString() + '.' + (upfront % UNIT).toString().padStart(14, '0'), durationDays: Number(daysText), workUrl: get('work_url') };

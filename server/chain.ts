@@ -2,11 +2,11 @@ import { ApiPromise, WsProvider } from '@polkadot/api';
 import { randomUUID } from 'node:crypto';
 import { Keyring } from '@polkadot/keyring';
 import type { KeyringPair } from '@polkadot/keyring/types';
-import { NETWORK, type Award, type NetworkState, type PendingApproval, type Receipt, type TransactionPlan, type Treasury, type WalletState } from '../shared/types.js';
-import { vestedRemaining, UNIT } from '../shared/money.js';
+import { NETWORK, type Award, type NetworkState, type PendingApproval, type Receipt, type TransactionPlan, type Treasury, type WalletState, type PayoutRound } from '../shared/types.js';
+import { vestedRemaining, UNIT, schedule } from '../shared/money.js';
 import { normalizeAddress, sameAddress } from './identity.js';
 import type { DataStore } from './store.js';
-import { awardTermsHash, fundingCall, transactionFromCall } from '../shared/calls.js';
+import { awardTermsHash, fundingCall, transactionFromCall, roundFundingCall, roundTermsHash } from '../shared/calls.js';
 
 export const initialNetwork = (): NetworkState => ({
   connected: false, verified: false, name: NETWORK.name, genesis: NETWORK.genesis,
@@ -130,7 +130,7 @@ export class Chain {
       eligibleUnlockRaw: (lockAmount > remaining ? lockAmount - remaining : 0n).toString(), schedules,
     };
   }
-  async pending(treasury: Treasury, award: Award): Promise<PendingApproval | null> {
+  async pending(treasury: Treasury, award: { callHash?: string }): Promise<PendingApproval | null> {
     if (!award.callHash) return null;
     const api = this.requireApi();
     const value: any = await api.query.multisig.multisigs(treasury.address, award.callHash);
@@ -176,12 +176,12 @@ export class Chain {
       return this.estimate(api.tx.multisig.cancelAsMulti(treasury.threshold, others, pending.timepoint, prepared.callHash!), signer, 'cancellation');
     }
     if (prepared.specVersion !== this.state.specVersion) throw new Error('The runtime changed. Cancel this proposal and create a new award to review the new call.');
-    if (this.state.bestBlock >= prepared.startBlock) throw new Error('The scheduled start has passed. Cancel this proposal and create a new award with a future start.');
+    if (BigInt(prepared.lockedRaw) > 0n && this.state.bestBlock >= prepared.startBlock) throw new Error('The scheduled start has passed. Cancel this proposal and create a new award with a future start.');
     if (pending?.approvals.includes(signer)) throw new Error('This wallet has already approved. Another treasury signer must approve next.');
     const wallet = await this.wallet(treasury.address);
     if (BigInt(wallet.spendableRaw) < BigInt(prepared.totalRaw)) throw new Error('Fund the treasury before requesting approval. It must retain its minimum account balance.');
     const recipient = await this.wallet(prepared.recipient);
-    if (recipient.schedules.length >= this.state.maxSchedules) throw new Error('This recipient has reached the native vesting schedule limit.');
+    if (BigInt(prepared.lockedRaw) > 0n && recipient.schedules.length >= this.state.maxSchedules) throw new Error('This recipient has reached the native vesting schedule limit.');
     const inner = transactionFromCall(api, prepared.callHex!);
     const weight = (await inner.paymentInfo(treasury.address)).weight;
     // Normalize codec values through strings: integer codecs need not expose
@@ -201,6 +201,66 @@ export class Chain {
     const plan = await this.estimate(call, signer, 'treasury funding');
     if (BigInt((await this.wallet(signer)).spendableRaw) < amount + BigInt(plan.feeRaw)) throw new Error('The wallet cannot cover this transfer and its fee while keeping the minimum account balance.');
     return plan;
+  }
+  async prepareRound(round: PayoutRound, treasury: Treasury) {
+    const owner = randomUUID(), key = 'prepare-round:' + round.id;
+    if (!await this.store.acquireLease(key, owner, 30_000)) throw new Error('Another signer is preparing this round. Try again shortly.');
+    try {
+      const latest = await this.store.round(round.id);
+      if (!latest || !['draft', 'awaiting_approval'].includes(latest.status)) throw new Error('This round can no longer be prepared.');
+      if (latest.callHex) return latest;
+      const start = this.state.bestBlock + latest.startDelayBlocks;
+      const awards = latest.awards.map(a => BigInt(a.lockedRaw) > 0n
+        ? { ...a, startBlock: start, ...schedule(BigInt(a.lockedRaw), a.durationBlocks, start) } : a);
+      const prepared = { ...latest, awards, preparedBlock: this.state.finalizedBlock, specVersion: this.state.specVersion };
+      const batch = roundFundingCall(this.requireApi(), prepared, treasury);
+      if (batch.method.encodedLength > 48_000) throw new Error('This round is too large. Create smaller rounds before requesting signatures.');
+      const result = { ...prepared, callHex: batch.method.toHex(), callHash: batch.method.hash.toHex(), termsHash: roundTermsHash(prepared, treasury) };
+      await this.store.saveRound(result);
+      return result;
+    } finally { await this.store.releaseLease(key, owner); }
+  }
+  async roundApprovalPlan(round: PayoutRound, treasury: Treasury, signer: string, cancel = false) {
+    await this.refresh();
+    const api = this.requireApi();
+    const latest = (await this.store.round(round.id))!;
+    if (['funded', 'cancelled', 'failed'].includes(latest.status)) throw new Error('This round has already been finalized.');
+    if (!treasury.signatories.includes(signer)) throw new Error('Only a treasury signer can approve this round.');
+    if (this.state.lastSyncedBlock < this.state.finalizedBlock) throw new Error('Finalized history is catching up. Retry after synchronization.');
+    const prepared = await this.prepareRound(latest, treasury);
+    const pending = await this.pending(treasury, prepared);
+    const others = treasury.signatories.filter(a => !sameAddress(a, signer));
+    if (cancel) {
+      if (!pending || !sameAddress(pending.depositor, signer)) throw new Error('Only the initiating signer can cancel this proposal.');
+      return this.estimate(api.tx.multisig.cancelAsMulti(treasury.threshold, others, pending.timepoint, prepared.callHash!), signer, 'cancellation');
+    }
+    if (prepared.specVersion !== this.state.specVersion) throw new Error('The runtime changed. Cancel this proposal and create a new round.');
+    if (pending?.approvals.includes(signer)) throw new Error('This wallet has already approved the round.');
+    if (prepared.awards.some(a => BigInt(a.lockedRaw) > 0n && this.state.bestBlock >= a.startBlock)) throw new Error('A vesting start has passed. Cancel and create a new round.');
+    const treasuryWallet = await this.wallet(treasury.address);
+    if (BigInt(treasuryWallet.spendableRaw) < BigInt(prepared.totalRaw)) throw new Error('The treasury cannot fund this complete round while retaining its minimum balance.');
+    const recipients = [...new Set(prepared.awards.map(a => a.recipient))];
+    const checkRecipient = async (recipient: string) => {
+      const wallet = await this.wallet(recipient);
+      const payments = prepared.awards.filter(a => a.recipient === recipient);
+      const schedules = payments.filter(a => BigInt(a.lockedRaw) > 0n).length;
+      if (wallet.schedules.length + schedules > this.state.maxSchedules) throw new Error('A recipient would exceed the native vesting schedule limit.');
+      if (BigInt(wallet.freeRaw) + BigInt(payments[0].lockedRaw || '0') === 0n && BigInt(payments[0].upfrontRaw) < BigInt(this.state.existentialDepositRaw)) throw new Error('The first payment to a new recipient must cover the minimum account balance.');
+    };
+    for (let i = 0; i < recipients.length; i += 4) await Promise.all(recipients.slice(i, i + 4).map(checkRecipient));
+    const inner = transactionFromCall(api, prepared.callHex!);
+    const info = await inner.paymentInfo(treasury.address);
+    const weight = info.weight;
+    const maxWeight = { refTime: ((BigInt(weight.refTime.toString()) * 12n + 9n) / 10n).toString(),
+      proofSize: ((BigInt(weight.proofSize.toString()) * 12n + 9n) / 10n).toString() };
+    const maxBlock: any = (api.consts.system.blockWeights as any)?.maxBlock;
+    if (maxBlock && (BigInt(maxWeight.refTime) > BigInt(maxBlock.refTime.toString()) * 3n / 4n
+      || BigInt(maxWeight.proofSize) > BigInt(maxBlock.proofSize.toString()) * 3n / 4n)) throw new Error('This round exceeds the safe transaction weight. Split it into smaller rounds.');
+    const final = Boolean(pending && pending.approvals.length + 1 >= treasury.threshold);
+    const call = final ? api.tx.multisig.asMulti(treasury.threshold, others, pending!.timepoint, inner.method, maxWeight)
+      : api.tx.multisig.approveAsMulti(treasury.threshold, others, pending?.timepoint ?? null, prepared.callHash!, maxWeight);
+    const deposit = pending ? 0n : BigInt(this.state.depositBaseRaw) + BigInt(treasury.threshold) * BigInt(this.state.depositFactorRaw);
+    return this.estimate(call, signer, final ? 'funding' : 'approval', deposit);
   }
   async unlockPlan(recipient: string, signer: string) {
     const api = this.requireApi();
@@ -226,7 +286,7 @@ export class Chain {
     const savedCursor = await this.store.getMeta(cursorKey);
     // Only prepared calls can have matching on-chain activity. Their creation
     // block precedes signing, so older history cannot contain an award receipt.
-    const preparedAwards = (await this.store.list<Award>('awards')).filter(award => award.callHash);
+    const preparedAwards = [...await this.store.list<Award>('awards'), ...await this.store.list<PayoutRound>('rounds')].filter(award => award.callHash);
     const earliestRelevantBlock = preparedAwards.length
       ? Math.min(...preparedAwards.map(award => award.createdBlock))
       : this.state.finalizedBlock;
@@ -269,6 +329,8 @@ export class Chain {
         suppliedRecords ?? api.query.system.events.at(blockHash)]);
       if (txHash && !block.block.extrinsics.some((tx: any) => tx.hash.toHex() === txHash)) throw new Error('The transaction is not present in this finalized block.');
       const awards = await this.store.list<Award>('awards');
+      const rounds = await this.store.list<PayoutRound>('rounds');
+      const treasuries = await this.store.list<Treasury>('treasuries');
       for (let index = 0; index < block.block.extrinsics.length; index++) {
         const events: any[] = records.filter((record: any) => record.phase.isApplyExtrinsic && record.phase.asApplyExtrinsic.toNumber() === index).map((record: any) => record.event);
         const tx = block.block.extrinsics[index];
@@ -283,6 +345,25 @@ export class Chain {
             if (!['NewMultisig', 'MultisigApproval', 'MultisigExecuted', 'MultisigCancelled'].includes(event.method)) continue;
             const callHash = event.data[isNew ? 2 : 3].toHex();
             const award = awards.find(item => item.callHash === callHash);
+            const round = rounds.find(item => item.callHash === callHash);
+            if (round) {
+              const treasury = treasuries.find(t => t.id === round.treasuryId)!;
+              if (!sameAddress(event.data[isNew ? 1 : 2].toString(), treasury.address)) continue;
+              let kind: Receipt['kind'] = 'approval';
+              if (event.method === 'MultisigExecuted') {
+                const success = fundingSucceeded(event.data[4].isOk, events.map(e => e.method));
+                kind = success ? 'funding' : 'failed';
+                if (!['funded', 'failed', 'cancelled'].includes(round.status)) {
+                  round.status = success ? 'funded' : 'failed';
+                  if (success) { round.fundingBlock = blockNumber; round.fundingTx = base.txHash; }
+                  else round.failure = 'The atomic batch failed. No payments in this round were confirmed.';
+                }
+              } else if (event.method === 'MultisigCancelled') { if (!['funded', 'failed', 'cancelled'].includes(round.status)) round.status = 'cancelled'; kind = 'cancellation'; }
+              else if (!['funded', 'cancelled', 'failed'].includes(round.status)) round.status = 'awaiting_approval';
+              round.awards = round.awards.map(a => ({ ...a, status: round.status, fundingBlock: round.fundingBlock, fundingTx: round.fundingTx }));
+              await this.store.saveRound(round);
+              await this.store.saveReceipt({ ...base, awardId: round.id, kind });
+            }
             if (!award) continue;
             const treasury = (await this.store.treasury(award.treasuryId))!;
             if (!sameAddress(event.data[isNew ? 1 : 2].toString(), treasury.address)) continue;
@@ -305,6 +386,9 @@ export class Chain {
             && tx.method.section === 'vesting' && ['vest', 'vestOther'].includes(tx.method.method)) {
             for (const award of awards.filter(item => item.status === 'funded' && sameAddress(item.recipient, event.data[0].toString()))) {
               await this.store.saveReceipt({ ...base, awardId: award.id, kind: 'unlock' });
+            }
+            for (const round of rounds.filter(item => item.status === 'funded' && item.awards.some(a => sameAddress(a.recipient, event.data[0].toString())))) {
+              await this.store.saveReceipt({ ...base, awardId: round.id, kind: 'unlock' });
             }
           }
         }
