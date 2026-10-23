@@ -199,6 +199,7 @@ export default function App() {
         <div className="sidebar-note"><ShieldCheck size={17} /><span>Your wallets.<br /><strong>Your treasury.</strong></span><button className="icon-button" aria-label="How PortaFlow works" onClick={() => setModal('guide')}><ArrowUpRight size={14} /></button></div>
         <button className="nav-secondary" onClick={() => setModal('guide')}><CircleHelp size={16} />How it works<ArrowUpRight size={13} /></button>
         <a className="nav-secondary" href="https://portaldot-dev.readthedocs.io/en/latest/" target="_blank" rel="noreferrer"><FileText size={16} />Portaldot docs<ExternalLink size={12} /></a>
+        <a className="nav-secondary" href={NETWORK.explorer} target="_blank" rel="noreferrer"><ExternalLink size={16} />Testnet explorer<ArrowUpRight size={12} /></a>
         <div className="sidebar-network"><span className={'connection-dot ' + (networkReady ? 'online' : '')} /><span>Portaldot testnet</span><span className="version">v3</span></div>
       </div>
     </aside>

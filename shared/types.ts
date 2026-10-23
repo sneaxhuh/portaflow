@@ -3,7 +3,7 @@ export const NETWORK = {
   rpc: 'wss://test-node-v3.portaldot.dev',
   genesis: '0xd4f9acbcf7f52388d8b095abe3c198d19fc510e0343e643e87cfbccb155283bd',
   symbol: 'tPOT', decimals: 14, ss58: 42,
-  explorer: 'https://node-console.portaldot.dev/',
+  explorer: 'https://scanner-testnet-v3.portaldot.dev/',
 };
 
 export type Treasury = {

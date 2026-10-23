@@ -96,7 +96,7 @@ Wallet private keys never enter PortaFlow. Signatures are requested through the 
 | Native token | tPOT |
 | Token decimals | 14 |
 | SS58 prefix | 42 |
-| Node console | [node-console.portaldot.dev](https://node-console.portaldot.dev/) |
+| Testnet block explorer | [scanner-testnet-v3.portaldot.dev](https://scanner-testnet-v3.portaldot.dev/) |
 
 The application uses real testnet accounts, balances, multisig proposals, vesting schedules, finalized blocks, events, and network fees. Demo figures are not simulated.
 
