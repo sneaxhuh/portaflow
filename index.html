@@ -1,9 +1,20 @@
 <!doctype html>
-<html lang="en" data-theme="portaflow">
+<html lang="en" data-theme="portaflow-light" data-appearance="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7f7f3" />
+    <script>
+      (() => {
+        let theme;
+        try { theme = localStorage.getItem('portaflow-theme'); } catch {}
+        if (theme !== 'dark' && theme !== 'light') theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = 'portaflow-' + theme;
+        document.documentElement.dataset.appearance = theme;
+        document.documentElement.style.colorScheme = theme;
+        document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#151719' : '#f7f7f3';
+      })();
+    </script>
     <meta name="description" content="Shared treasury approvals and committed contributor funding on Portaldot. Award, approve, and unlock with PortaFlow." />
     <title>PortaFlow · Contributor funding</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

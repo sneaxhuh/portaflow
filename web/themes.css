@@ -1,0 +1,172 @@
+@plugin 'daisyui/theme' {
+  name: 'portaflow-light';
+  default: true;
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #f7f7f3;
+  --color-base-300: #e2e2da;
+  --color-base-content: #1b1c1e;
+  --color-primary: #2b59c3;
+  --color-primary-content: #ffffff;
+  --color-secondary: #44464b;
+  --color-secondary-content: #ffffff;
+  --color-accent: #2b59c3;
+  --color-accent-content: #ffffff;
+  --color-neutral: #efefea;
+  --color-neutral-content: #44464b;
+  --color-info: #2b59c3;
+  --color-info-content: #ffffff;
+  --color-success: #1d6f47;
+  --color-success-content: #ffffff;
+  --color-warning: #8a5a00;
+  --color-warning-content: #ffffff;
+  --color-error: #a8261d;
+  --color-error-content: #ffffff;
+  --radius-selector: 0.375rem;
+  --radius-field: 0.375rem;
+  --radius-box: 0.5rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+@plugin 'daisyui/theme' {
+  name: 'portaflow-dark';
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: #1c1f22;
+  --color-base-200: #151719;
+  --color-base-300: #30353a;
+  --color-base-content: #e8eaed;
+  --color-primary: #6895f5;
+  --color-primary-content: #101b30;
+  --color-secondary: #bec4cd;
+  --color-secondary-content: #151719;
+  --color-accent: #6895f5;
+  --color-accent-content: #101b30;
+  --color-neutral: #191c1f;
+  --color-neutral-content: #bec4cd;
+  --color-info: #8aafff;
+  --color-info-content: #101b30;
+  --color-success: #82cba5;
+  --color-success-content: #10261b;
+  --color-warning: #e0ba76;
+  --color-warning-content: #2a2214;
+  --color-error: #ef9e99;
+  --color-error-content: #301b1b;
+  --radius-selector: 0.375rem;
+  --radius-field: 0.375rem;
+  --radius-box: 0.5rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+html[data-appearance=light] { background: #f7f7f3; color-scheme: light; }
+html[data-appearance=dark] { background: #151719; color-scheme: dark; }
+html[data-appearance=dark] body.portaflow-redesign {
+  --pf-canvas: #151719;
+  --pf-surface: #1c1f22;
+  --pf-sidebar: #191c1f;
+  --pf-sidebar-hover: #252a30;
+  --pf-ink: #e8eaed;
+  --pf-ink-2: #bec4cd;
+  --pf-muted: #a0a7b2;
+  --pf-faint: #929aa5;
+  --pf-rule: #30353a;
+  --pf-rule-strong: #454c55;
+  --pf-row-hover: #22262b;
+  --pf-accent: #6895f5;
+  --pf-accent-hover: #8aafff;
+  --pf-accent-weak: #202e49;
+  --pf-accent-ink: #101b30;
+  --pf-ok: #82cba5;
+  --pf-ok-weak: #1c3027;
+  --pf-warn: #e0ba76;
+  --pf-warn-weak: #342b1c;
+  --pf-err: #ef9e99;
+  --pf-err-weak: #372325;
+  color-scheme: dark;
+}
+
+/* One palette for daisyUI, shadcn primitives, legacy awards, and portal dialogs. */
+body.portaflow-redesign {
+  --pf-ok-border: color-mix(in srgb, var(--pf-ok) 32%, var(--pf-rule));
+  --pf-warn-border: color-mix(in srgb, var(--pf-warn) 32%, var(--pf-rule));
+  --pf-err-border: color-mix(in srgb, var(--pf-err) 32%, var(--pf-rule));
+}
+body.portaflow-redesign .theme-toggle.btn { width: 32px; height: 32px; min-height: 32px; padding: 0; color: var(--pf-muted); border-color: transparent; background: transparent; border-radius: 6px; }
+body.portaflow-redesign .theme-toggle:hover { background: var(--pf-sidebar-hover); color: var(--pf-ink); }
+body.portaflow-redesign .nav-section-label { color: var(--pf-muted); }
+body.portaflow-redesign .workspace-avatar { border-color: var(--pf-rule-strong); }
+body.portaflow-redesign .btn-primary, body.portaflow-redesign [data-slot=button][data-variant=default] { color: var(--pf-accent-ink); }
+body.portaflow-redesign .status-funded, body.portaflow-redesign .award-status-funded, body.portaflow-redesign .op-immediate,
+body.portaflow-redesign .verification-verified, body.portaflow-redesign .verification-verified [data-slot=badge],
+body.portaflow-redesign .person-avatar.approved, body.portaflow-redesign .op-signer-icon.signed, body.portaflow-redesign .unlock-box { border-color: var(--pf-ok-border); }
+body.portaflow-redesign .status-awaiting_approval, body.portaflow-redesign .award-status-awaiting_approval, body.portaflow-redesign .op-notice { border-color: var(--pf-warn-border); color: var(--pf-warn); }
+body.portaflow-redesign .status-failed, body.portaflow-redesign .verification-invalid { border-color: var(--pf-err-border); }
+body.portaflow-redesign .checkbox { background: var(--pf-surface); }
+body.portaflow-redesign .checkbox:checked { color: var(--pf-accent-ink); }
+body.portaflow-redesign .schedule-block-marker { border-color: var(--pf-surface); color: var(--pf-accent-ink); }
+
+/* Consistent card anatomy: one header rule, one body, no doubled borders. */
+body.portaflow-redesign .panel, body.portaflow-redesign .op-card { border-radius: 8px; }
+body.portaflow-redesign .panel-heading, body.portaflow-redesign .op-card [data-slot=card-header] { padding: 16px 18px; min-height: 62px; }
+body.portaflow-redesign .op-card [data-slot=card-header] { gap: 6px; }
+body.portaflow-redesign .op-card [data-slot=card-content] { padding: 18px; }
+body.portaflow-redesign .op-card [data-slot=card-title], body.portaflow-redesign .panel-heading h2 { font-size: 14px; line-height: 1.5; }
+body.portaflow-redesign .op-stack, body.portaflow-redesign .detail-main, body.portaflow-redesign .detail-aside { gap: 20px; }
+body.portaflow-redesign .op-evidence:first-child, body.portaflow-redesign .op-signers > div:first-child, body.portaflow-redesign .op-checks > div:first-child { border-top: 0; padding-top: 0; }
+body.portaflow-redesign .op-evidence:last-child, body.portaflow-redesign .op-signers > div:last-child, body.portaflow-redesign .op-checks > div:last-child { padding-bottom: 0; }
+body.portaflow-redesign .op-summary-row { padding: 12px 0; }
+body.portaflow-redesign .op-summary-row:first-child { padding-top: 0; border-top: 0; }
+body.portaflow-redesign .op-summary-row + .fine-print { margin-top: 12px; }
+body.portaflow-redesign .op-round-totals { border-top: 0; border-bottom: 0; }
+body.portaflow-redesign .op-round-totals > div { padding: 12px 16px; }
+body.portaflow-redesign .op-round-totals > div:first-child { padding-left: 0; }
+body.portaflow-redesign .op-round-totals > div:last-child { padding-right: 0; }
+body.portaflow-redesign .round-form .op-round-totals > div { padding: 14px; }
+body.portaflow-redesign .op-empty { min-height: 170px; }
+body.portaflow-redesign .op-empty > svg { width: 20px; height: 20px; color: var(--pf-muted); }
+body.portaflow-redesign .treasury-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+body.portaflow-redesign .treasury-summary .full-width { margin: 0 16px 16px; width: calc(100% - 32px); }
+body.portaflow-redesign .address-box { align-items: center; }
+body.portaflow-redesign .recipient-detail { align-items: center; }
+body.portaflow-redesign .op-explainer { border: 0; padding: 0 4px; }
+body.portaflow-redesign .op-hash { margin: 0; font-size: 11px; line-height: 1.8; }
+body.portaflow-redesign .op-release-cell { min-width: 180px; }
+body.portaflow-redesign td.op-release-cell { display: table-cell; vertical-align: middle; }
+body.portaflow-redesign .op-release-cell small { white-space: normal; line-height: 1.6; }
+
+/* daisyUI fieldsets keep multi-payment forms visually separated and legible. */
+body.portaflow-redesign .op-payment-editor { gap: 16px; }
+body.portaflow-redesign .op-payment-row.fieldset { display: block; padding: 4px 18px 2px; border: 1px solid var(--pf-rule); background: var(--pf-canvas); border-radius: 7px; }
+body.portaflow-redesign .op-payment-row .fieldset-legend { padding: 0 8px; font-size: 12px; font-weight: 500; color: var(--pf-ink-2); }
+body.portaflow-redesign .op-payment-row .op-row-controls { top: 8px; right: 8px; }
+body.portaflow-redesign .field-label { line-height: 1.5; }
+body.portaflow-redesign .optional, body.portaflow-redesign .field-help { color: var(--pf-muted); }
+body.portaflow-redesign .form-columns { align-items: start; }
+body.portaflow-redesign .op-import-preview { padding: 0 14px; }
+body.portaflow-redesign .pf-dialog .modal-heading { margin-bottom: 20px; padding-bottom: 16px; }
+body.portaflow-redesign .pf-dialog .modal-heading .icon-button { margin: 0; }
+body.portaflow-redesign .pf-dialog .modal-footer { margin-top: 20px; padding-top: 16px; }
+body.portaflow-redesign .pf-dialog .review-target { margin-bottom: 18px; }
+body.portaflow-redesign .pf-dialog .op-review-payments { margin: 10px 0 18px; padding-right: 4px; }
+body.portaflow-redesign .review-details > div { padding-left: 0; padding-right: 0; }
+body.portaflow-redesign .pf-dialog .wallet-options:empty { display: none; }
+body.portaflow-redesign .pf-dialog .wallet-option { gap: 12px; padding: 14px; }
+body.portaflow-redesign .wallet-network-help p, body.portaflow-redesign .wallet-guidance p { color: var(--pf-muted); }
+body.portaflow-redesign .wallet-guidance h3 { color: var(--pf-ink); }
+body.portaflow-redesign .wallet-network strong > span { color: var(--pf-muted); }
+body.portaflow-redesign .wallet-current { border-color: var(--pf-rule); }
+body.portaflow-redesign .table [data-slot=table-row], body.portaflow-redesign .award-table tr { border-color: var(--pf-rule); }
+@media (max-width: 950px) { body.portaflow-redesign .treasury-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) {
+  body.portaflow-redesign .topbar-actions { gap: 4px; }
+  body.portaflow-redesign .theme-toggle.btn, body.portaflow-redesign .refresh-button { width: 28px; min-width: 28px; }
+  body.portaflow-redesign .panel-heading, body.portaflow-redesign .op-card [data-slot=card-header] { padding: 14px 16px; }
+  body.portaflow-redesign .op-card [data-slot=card-content] { padding: 16px; }
+  body.portaflow-redesign .op-round-totals > div { padding: 10px 8px; }
+  body.portaflow-redesign .op-payment-row.fieldset { padding-left: 12px; padding-right: 12px; }
+  body.portaflow-redesign .op-detail-grid > aside { display: flex; flex-direction: column; }
+  body.portaflow-redesign .op-detail-grid > aside > * { width: 100%; }
+}
