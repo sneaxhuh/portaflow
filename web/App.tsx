@@ -1,34 +1,43 @@
-import { createContext, useContext, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Copy, Download, ExternalLink, FileText, Grid2X2, Layers3, LoaderCircle, Menu, Plus, Search, ShieldCheck, Users, Wallet, X, Clock3, RefreshCw, Link2, AlertCircle, CheckCircle2, LogOut, Upload } from 'lucide-react';
-import { NETWORK, type Award, type AwardDetail, type NetworkState, type Overview, type TransactionPlan, type Treasury, type WalletState } from '../shared/types';
+import { NETWORK, type Award, type AwardDetail, type NetworkState, type Overview, type PayoutRound, type TransactionPlan, type Treasury, type WalletState } from '../shared/types';
 import { formatAmount, parseAmount, shortAddress, UNIT, vestedRemaining } from '../shared/money';
 import { accounts, login, normalize, request, signTransaction, syncFinalizedReceipts, walletProviders, providerName, type NativeAccount, type NativeProvider } from './wallet';
 import { readAwardCsv, IMPORT_COLUMNS, type ImportRow } from '../shared/import';
+import { LedgerPage, RecipientPage, RoundForm, RoundList, RoundPage, VerifyPage } from './Operations';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './components/ui/dialog';
+import { Button } from './components/ui/button';
 
-type Page = 'overview' | 'awards' | 'approvals' | 'recipients' | 'treasury' | 'award';
-type ModalKind = 'wallet' | 'treasury' | 'award' | 'fund' | 'review' | 'guide' | 'import' | null;
-type Review = { plan: TransactionPlan; award?: Award; treasury?: Treasury; recipient?: string; amountRaw?: string };
+type Page = 'overview' | 'awards' | 'approvals' | 'recipients' | 'treasury' | 'award' | 'rounds' | 'round' | 'ledger' | 'my-funds' | 'verify';
+type ModalKind = 'wallet' | 'treasury' | 'award' | 'round' | 'fund' | 'review' | 'guide' | 'import' | null;
+type Review = { plan: TransactionPlan; award?: Award; round?: PayoutRound; treasury?: Treasury; recipient?: string; amountRaw?: string };
 const emptyNetwork: NetworkState = { connected: false, verified: false, name: NETWORK.name, genesis: NETWORK.genesis, finalizedBlock: 0, bestBlock: 0, specVersion: 0, blockSeconds: 6, existentialDepositRaw: '0', minVestedRaw: '0', maxSchedules: 0, depositBaseRaw: '0', depositFactorRaw: '0', lastSyncedBlock: 0, sponsorEnabled: false };
 const nav: { key: Page; label: string; icon: typeof Wallet }[] = [
   { key: 'overview', label: 'Overview', icon: Grid2X2 },
+  { key: 'rounds', label: 'Payout rounds', icon: Layers3 },
   { key: 'awards', label: 'Awards', icon: Layers3 },
   { key: 'approvals', label: 'Approvals', icon: CheckCheck },
   { key: 'recipients', label: 'Recipients', icon: Users },
   { key: 'treasury', label: 'Treasury', icon: Wallet },
+  { key: 'ledger', label: 'Treasury ledger', icon: FileText },
+  { key: 'my-funds', label: 'My funds', icon: ArrowDownLeft },
+  { key: 'verify', label: 'Verify receipt', icon: ShieldCheck },
 ];
 const ErrorContext = createContext('');
 function route() {
   const [section = 'overview', id] = location.hash.slice(2).split('/');
-  return { page: (id ? 'award' : nav.some(n => n.key === section) ? section : 'overview') as Page, id: id ?? '' };
+  return { page: (id && section === 'rounds' ? 'round' : id && section === 'awards' ? 'award' : nav.some(n => n.key === section) ? section : 'overview') as Page, id: id ?? '' };
 }
 function Money({ raw = '0', big = false }: { raw?: string; big?: boolean }) {
   return <span className={big ? 'money money-big' : 'money'} title={formatAmount(raw, 14) + ' tPOT'}>{formatAmount(raw, BigInt(raw) > 0n && BigInt(raw) < UNIT / 10_000n ? 14 : 4)} <span className="unit">tPOT</span></span>;
 }
 function Status({ award, block }: { award: Award; block: number }) {
+  if (award.lockedRaw === '0' && award.status === 'funded') return <span className="award-status award-status-funded"><span className="status-dot" />Paid immediately</span>;
   let status: string = award.status === 'awaiting_approval' ? 'Needs approval' : award.status === 'draft' ? 'Draft' : award.status === 'funded' ? block >= award.endBlock ? 'Fully vested' : block < award.startBlock ? 'Scheduled' : 'Vesting' : award.status === 'cancelled' ? 'Cancelled' : 'Failed';
   return <span className={'award-status award-status-' + award.status}><span className="status-dot" />{status}</span>;
 }
 function ReleaseProgress({ award, block, connected }: { award: Award; block: number; connected: boolean }) {
+  if (award.lockedRaw === '0') return <div className="op-immediate"><CheckCircle2 size={20} /><p>{award.status === 'funded' ? 'Paid in full at funding. This payment has no vesting schedule.' : '100% is available immediately once this award is funded.'}</p></div>;
   const duration = Math.max(1, award.endBlock - award.startBlock);
   const elapsed = Math.max(0, Math.min(duration, block - award.startBlock));
   const funded = award.status === 'funded';
@@ -52,14 +61,11 @@ function ReleaseProgress({ award, block, connected }: { award: Award; block: num
     <p className="schedule-progress-caption" aria-live="polite">{caption}{!connected && block > 0 ? ' · Connection paused' : ''}</p>
   </div>;
 }
-function Modal({ title, eyebrow, children, close, busy }: { title: string; eyebrow?: string; children: ReactNode; close: () => void; busy?: boolean }) {
-  const ref = useRef<HTMLDialogElement>(null);
+function Modal({ title, eyebrow, children, close, busy, wide = false }: { title: string; eyebrow?: string; children: ReactNode; close: () => void; busy?: boolean; wide?: boolean }) {
   const error = useContext(ErrorContext);
-  useEffect(() => { ref.current?.showModal(); }, []);
-  return <dialog ref={ref} className="modal" onCancel={event => { event.preventDefault(); if (!busy) close(); }}>
-    <div className="modal-box"><div className="modal-heading"><div>{eyebrow && <div className="eyebrow">{eyebrow}</div>}<h2>{title}</h2></div><button className="icon-button" aria-label="Close dialog" disabled={busy} onClick={close}><X size={18} /></button></div>{error && <div className="alert error-alert modal-error" role="alert"><AlertCircle size={15} /><span>{error}</span></div>}{children}</div>
-    <form method="dialog" className="modal-backdrop"><button onClick={event => { event.preventDefault(); if (!busy) close(); }} disabled={busy}>Close</button></form>
-  </dialog>;
+  return <Dialog open onOpenChange={open => { if (!open && !busy) close(); }}><DialogContent className={'pf-dialog' + (wide ? ' pf-dialog-wide' : '')} showCloseButton={false} onEscapeKeyDown={event => { if (busy) event.preventDefault(); }} onPointerDownOutside={event => { if (busy) event.preventDefault(); }}>
+    <div className="modal-heading"><div>{eyebrow && <div className="eyebrow">{eyebrow}</div>}<DialogTitle>{title}</DialogTitle></div><button className="icon-button" aria-label="Close dialog" disabled={busy} onClick={close}><X size={18} /></button></div><DialogDescription className="sr-only">Review the details and choose an action below.</DialogDescription>{error && <div className="alert error-alert modal-error" role="alert"><AlertCircle size={15} /><span>{error}</span></div>}{children}
+  </DialogContent></Dialog>;
 }
 function Empty({ icon: Icon = Layers3, title, text, action }: { icon?: typeof Layers3; title: string; text: string; action?: ReactNode }) {
   return <div className="empty-state"><div className="empty-symbol"><Icon size={23} strokeWidth={1.3} /></div><h3>{title}</h3><p>{text}</p>{action}</div>;
@@ -88,8 +94,11 @@ export default function App() {
   const treasury = data.treasuries.find(t => t.id === treasuryId) ?? data.treasuries[0];
   const address = data.session?.address;
   const awards = data.awards.filter(a => a.treasuryId === treasury?.id);
+  const rounds = (data.rounds || []).filter(r => r.treasuryId === treasury?.id);
+  const roundPayments = rounds.filter(r => r.status === 'funded').flatMap(r => r.awards);
   const pending = awards.filter(a => a.status === 'draft' || a.status === 'awaiting_approval');
-  const funded = awards.filter(a => a.status === 'funded');
+  const pendingCount = pending.length + rounds.filter(r => ['draft', 'awaiting_approval'].includes(r.status)).length;
+  const funded = [...awards.filter(a => a.status === 'funded'), ...roundPayments];
   const recipients = [...new Set(funded.map(a => a.recipient))];
   const committed = funded.reduce((sum, a) => sum + BigInt(a.totalRaw), 0n);
   const member = Boolean(address && treasury?.signatories.includes(address));
@@ -129,7 +138,7 @@ export default function App() {
     };
     addEventListener('keydown', focusSearch); return () => removeEventListener('keydown', focusSearch);
   }, [modal]);
-  const go = (next: Page, id?: string) => { location.hash = id ? '/awards/' + id : '/' + next; };
+  const go = (next: Page, id?: string) => { location.hash = id ? (next === 'round' ? '/rounds/' : '/awards/') + id : '/' + next; };
   const copy = async (value: string) => { try { await navigator.clipboard.writeText(value); setToast('Copied to clipboard'); } catch { setError('Clipboard access is unavailable. Select and copy the address manually.'); } };
   const act = async (fn: () => Promise<void>) => {
     if (busy) return; setBusy(true); setError('');
@@ -165,12 +174,12 @@ export default function App() {
     && (filter === 'all' || a.status === filter) && (a.title + ' ' + a.recipient).toLowerCase().includes(search.toLowerCase()));
   const network = data.network;
   const networkReady = network.connected && network.verified;
-  const createButton = <><button className="btn btn-primary" disabled={Boolean(address && treasury && !member)} title={address && treasury && !member ? 'Connect a treasury signer to create awards' : undefined} onClick={() => needWallet(treasury ? 'award' : 'treasury')}><Plus size={16} />{treasury ? 'New award' : 'Create treasury'}</button>{page === 'awards' && treasury && <button className="btn btn-outline" disabled={Boolean(address && !member)} onClick={() => needWallet('import')}><Upload size={14} />Import CSV</button>}</>;
+  const createButton = <><Button disabled={Boolean(address && treasury && !member)} title={address && treasury && !member ? 'Connect a treasury signer to create payments' : undefined} onClick={() => needWallet(treasury ? page === 'awards' ? 'award' : 'round' : 'treasury')}><Plus size={16} />{treasury ? page === 'awards' ? 'New award' : 'New payout round' : 'Create treasury'}</Button>{page === 'awards' && treasury && <button className="btn btn-outline" disabled={Boolean(address && !member)} onClick={() => needWallet('import')}><Upload size={14} />Import CSV</button>}</>;
 
   function AwardTable({ compact = false }: { compact?: boolean }) {
     const rows = compact ? selectedAwards.slice(0, 5) : selectedAwards;
     return <div className="table-scroll"><table className="table award-table"><thead><tr><th>Award / recipient</th><th>Amount</th><th>Status</th><th>Release schedule</th><th aria-label="View award" /></tr></thead><tbody>
-      {rows.map(award => <tr key={award.id}><td><button className="row-title" onClick={() => go('award', award.id)}><span className="row-file"><FileText size={17} /></span><span><strong>{award.title}</strong><small>{shortAddress(award.recipient)}</small></span></button></td><td><Money raw={award.totalRaw} /></td><td><Status award={award} block={network.finalizedBlock} /></td><td><span className="schedule-label">{Math.round(award.durationBlocks * network.blockSeconds / 86400) >= 1 ? Math.round(award.durationBlocks * network.blockSeconds / 86400) + ' days estimated' : award.durationBlocks + ' blocks'}</span><small className="muted">From #{award.startBlock.toLocaleString()}</small></td><td><button className="icon-button" aria-label={'Open ' + award.title} onClick={() => go('award', award.id)}><ChevronRight size={16} /></button></td></tr>)}
+      {rows.map(award => <tr key={award.id}><td><button className="row-title" onClick={() => go('award', award.id)}><span className="row-file"><FileText size={17} /></span><span><strong>{award.title}</strong><small>{shortAddress(award.recipient)}</small></span></button></td><td><Money raw={award.totalRaw} /></td><td><Status award={award} block={network.finalizedBlock} /></td><td><span className="schedule-label">{award.lockedRaw === '0' ? 'Immediate payment' : Math.round(award.durationBlocks * network.blockSeconds / 86400) >= 1 ? Math.round(award.durationBlocks * network.blockSeconds / 86400) + ' days estimated' : award.durationBlocks + ' blocks'}</span>{award.lockedRaw !== '0' && <small className="muted">From #{award.startBlock.toLocaleString()}</small>}</td><td><button className="icon-button" aria-label={'Open ' + award.title} onClick={() => go('award', award.id)}><ChevronRight size={16} /></button></td></tr>)}
     </tbody></table>{!rows.length && <Empty title={search || filter !== 'all' ? 'No matching awards' : page === 'approvals' ? 'Your approval queue is clear' : 'Your first award starts here'}
       text={search || filter !== 'all' ? 'Try another search or status.' : 'Fund a contribution, agree on its release schedule, and give the recipient a clear path to their funds.'}
       action={!search && filter === 'all' && <button className="btn btn-outline btn-sm" onClick={() => needWallet(treasury ? 'award' : 'treasury')}><Plus size={14} />{treasury ? 'Create an award' : 'Set up a treasury'}</button>} />}</div>;
@@ -185,7 +194,7 @@ export default function App() {
         </select><ChevronDown size={13} />
       </label>
       <div className="nav-section-label">WORKSPACE</div>
-      <nav className="menu">{nav.map(item => <a key={item.key} href={'#/' + item.key} className={page === item.key || page === 'award' && item.key === 'awards' ? 'nav-active' : ''}><item.icon size={17} strokeWidth={1.6} /><span>{item.label}</span>{item.key === 'approvals' && pending.length > 0 && <span className="nav-count">{pending.length}</span>}</a>)}</nav>
+      <nav className="menu">{nav.map(item => <a key={item.key} href={'#/' + item.key} className={page === item.key || page === 'award' && item.key === 'awards' || page === 'round' && item.key === 'rounds' ? 'nav-active' : ''}><item.icon size={17} strokeWidth={1.6} /><span>{item.label}</span>{item.key === 'approvals' && pendingCount > 0 && <span className="nav-count">{pendingCount}</span>}</a>)}</nav>
       <div className="sidebar-bottom">
         <div className="sidebar-note"><ShieldCheck size={17} /><span>Your wallets.<br /><strong>Your treasury.</strong></span><button className="icon-button" aria-label="How PortaFlow works" onClick={() => setModal('guide')}><ArrowUpRight size={14} /></button></div>
         <button className="nav-secondary" onClick={() => setModal('guide')}><CircleHelp size={16} />How it works<ArrowUpRight size={13} /></button>
@@ -195,25 +204,26 @@ export default function App() {
     </aside>
     {mobileOpen && <button className="navigation-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <div className="workspace">
-      <header className="topbar"><div className="breadcrumbs"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu size={19} /></button><span className="breadcrumb-workspace">{treasury?.name || 'Workspace'}</span><ChevronRight size={12} /><strong>{page === 'award' ? 'Award details' : nav.find(n => n.key === page)?.label}</strong></div>
+      <header className="topbar"><div className="breadcrumbs"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu size={19} /></button><span className="breadcrumb-workspace">{treasury?.name || 'Workspace'}</span><ChevronRight size={12} /><strong>{page === 'award' ? 'Award details' : page === 'round' ? 'Payout round' : nav.find(n => n.key === page)?.label}</strong></div>
         <div className="topbar-actions"><span className="testnet-label">Testnet</span><button className="wallet-button" onClick={openWallet}><Wallet size={15} />{address ? shortAddress(address) : 'Connect wallet'}<ChevronDown size={12} /></button></div></header>
       <main>
         {!networkReady && loaded && <div className="network-notice"><LoaderCircle size={15} className="spin" /><span>{network.error || 'Connecting to Portaldot V3. Chain actions become available after network verification.'}</span></div>}
-        {page !== 'award' && <div className="page-heading"><div><div className="eyebrow">{page === 'overview' ? 'YOUR FUNDING WORKSPACE' : 'WORKSPACE / ' + page.toUpperCase()}</div><h1>{page === 'overview' ? 'Treasury overview' : nav.find(n => n.key === page)?.label}</h1><p>{page === 'overview' ? 'Commit funding. Keep everyone in the loop.' : page === 'approvals' ? 'Review the exact terms before your treasury commits funds.' : page === 'treasury' ? 'A shared treasury, controlled by its signers.' : page === 'recipients' ? 'The people and teams your treasury has funded.' : 'Every contribution, with a clear funding commitment.'}</p></div><div className="heading-actions">{page === 'treasury' && treasury && <button className="btn btn-outline" onClick={() => needWallet('treasury')}><Plus size={15} />New treasury</button>}{createButton}</div></div>}
+        {page !== 'award' && page !== 'round' && <div className="page-heading"><div><div className="eyebrow">{page === 'overview' ? 'YOUR FUNDING WORKSPACE' : 'WORKSPACE / ' + page.replace('-', ' ').toUpperCase()}</div><h1>{page === 'overview' ? 'Treasury overview' : nav.find(n => n.key === page)?.label}</h1><p>{page === 'overview' ? 'Commit funding. Keep everyone in the loop.' : page === 'rounds' ? 'Pay a whole contributor round with one approval flow.' : page === 'ledger' ? 'Follow the funds, from treasury deposit to recipient.' : page === 'my-funds' ? 'Your funding, vesting progress, and unlocks across workspaces.' : page === 'verify' ? 'Check the payment against finalized Portaldot evidence.' : page === 'approvals' ? 'Review the exact terms before your treasury commits funds.' : page === 'treasury' ? 'A shared treasury, controlled by its signers.' : page === 'recipients' ? 'The people and teams your treasury has funded.' : 'Every contribution, with a clear funding commitment.'}</p></div><div className="heading-actions">{page === 'treasury' && treasury && <button className="btn btn-outline" onClick={() => needWallet('treasury')}><Plus size={15} />New treasury</button>}{!['my-funds', 'verify', 'ledger'].includes(page) && createButton}</div></div>}
 
         {page === 'overview' && <>
           <div className="stats-strip">
             <div className="stat-item"><span>Available to award <Wallet size={14} /></span><strong>{wallet ? <Money raw={wallet.spendableRaw} /> : <span className="unknown-amount">— <span>tPOT</span></span>}</strong><small>{treasury ? 'After minimum account balance' : 'Set up your shared treasury'}</small></div>
             <div className="stat-item"><span>Total funded <ArrowUpRight size={14} /></span><strong><Money raw={committed.toString()} /></strong><small>{funded.length} funded award{funded.length !== 1 ? 's' : ''}</small></div>
-            <div className="stat-item"><span>Awaiting approval <Clock3 size={14} /></span><strong>{pending.length}<span className="stat-word"> awards</span></strong><small>Review with your treasury signers</small></div>
+            <div className="stat-item"><span>Awaiting approval <Clock3 size={14} /></span><strong>{pendingCount}<span className="stat-word"> proposals</span></strong><small>Rounds and individual awards</small></div>
             <div className="stat-item"><span>Recipients <Users size={14} /></span><strong>{recipients.length}<span className="stat-word"> wallets</span></strong><small>Funded directly on Portaldot</small></div>
           </div>
           <div className="overview-grid">
             <section className="panel schedule-panel"><div className="panel-heading"><div><h2>Funding schedule</h2><p>Awarded funds and their release progress.</p></div><span className="subtle-label"><span className="connection-dot online" />{funded.length} funded</span></div>
               {funded.length ? <div className="schedule-list">{funded.slice(0, 4).map(award => {
                 const remaining = vestedRemaining(BigInt(award.lockedRaw), BigInt(award.perBlockRaw), award.startBlock, network.finalizedBlock);
-                const percent = Number((BigInt(award.lockedRaw) - remaining) * 100n / BigInt(award.lockedRaw));
-                return <button className="schedule-row" key={award.id} onClick={() => go('award', award.id)}><div className="schedule-row-heading"><span>{award.title}</span><Money raw={award.totalRaw} /></div><progress className="progress" value={percent} max={100} /><div className="schedule-row-caption"><span>{percent}% of vested portion earned</span><span>Through #{award.endBlock.toLocaleString()}</span></div></button>;
+                const percent = award.lockedRaw === '0' ? 100 : Number((BigInt(award.lockedRaw) - remaining) * 100n / BigInt(award.lockedRaw));
+                const parent = rounds.find(r => r.awards.some(a => a.id === award.id));
+                return <button className="schedule-row" key={award.id} onClick={() => go(parent ? 'round' : 'award', parent?.id || award.id)}><div className="schedule-row-heading"><span>{award.title}</span><Money raw={award.totalRaw} /></div><progress className="progress" value={percent} max={100} /><div className="schedule-row-caption"><span>{award.lockedRaw === '0' ? 'Paid immediately' : percent + '% of vested portion earned'}</span><span>{award.lockedRaw === '0' ? 'No vesting lock' : 'Through #' + award.endBlock.toLocaleString()}</span></div></button>;
               })}</div> : <div className="schedule-empty"><div className="release-illustration" aria-hidden="true"><span /><span /><span /><span /><span /><span /><i /></div><h3>A clear path from award to unlock.</h3><p>Your funded awards will appear here, with progress<br className="desktop-break" /> read from finalized Portaldot blocks.</p><button className="text-button" onClick={() => setModal('guide')}>See how funding works <ArrowRight size={14} /></button></div>}
               <div className="panel-footnote"><ShieldCheck size={13} />Funded vesting is enforced by the chain.</div>
             </section>
@@ -222,6 +232,7 @@ export default function App() {
                 <div className="treasury-onboarding"><div className="treasury-outline"><Wallet size={27} strokeWidth={1.1} /></div><h3>Make it a shared commitment.</h3><p>Choose your signers and approval threshold. Your team stays in control of the funds.</p><button className="btn btn-outline full-width" onClick={() => needWallet('treasury')}>Create treasury <ArrowRight size={14} /></button></div>}
             </section>
           </div>
+          <RoundList rounds={rounds} compact open={id => go('round', id)} />
           <section className="panel"><div className="panel-heading"><div><h2>Recent awards</h2><p>Funding commitments, approvals, and recipients.</p></div><button className="btn btn-ghost btn-sm" onClick={() => go('awards')}>View all <ArrowUpRight size={14} /></button></div><AwardTable compact /></section>
         </>}
 
@@ -240,10 +251,10 @@ export default function App() {
             <section className="panel award-amount-panel"><div className="panel-heading"><span className="muted">Total award</span><span className="testnet-label">Native tPOT</span></div><Money big raw={detail.award.totalRaw} /><div className="award-split"><div><span className="legend-dot immediate" /><span>Immediate payment</span><strong><Money raw={detail.award.upfrontRaw} /></strong></div><div><span className="legend-dot vested" /><span>Funded vesting</span><strong><Money raw={detail.award.lockedRaw} /></strong></div></div>
               <div className="split-track"><span style={{ width: Number(BigInt(detail.award.upfrontRaw) * 100n / BigInt(detail.award.totalRaw)) + '%' }} /><span /></div>
             </section>
-            <section className="panel"><div className="panel-heading"><div><h2>Release schedule</h2><p>Calculated from actual Portaldot blocks.</p></div><Clock3 size={16} className="muted" /></div><div className="vesting-body"><div className="vesting-amounts"><div><small>Earned from vested portion</small><strong><Money raw={detail.vestedRaw} /></strong></div><div><small>Scheduled remainder</small><strong><Money raw={detail.remainingRaw} /></strong></div></div>
+            <section className="panel"><div className="panel-heading"><div><h2>{detail.award.lockedRaw === '0' ? 'Immediate payment' : 'Release schedule'}</h2><p>{detail.award.lockedRaw === '0' ? 'No vesting schedule is created.' : 'Calculated from actual Portaldot blocks.'}</p></div><Clock3 size={16} className="muted" /></div><div className="vesting-body">{detail.award.lockedRaw !== '0' && <div className="vesting-amounts"><div><small>Earned from vested portion</small><strong><Money raw={detail.vestedRaw} /></strong></div><div><small>Scheduled remainder</small><strong><Money raw={detail.remainingRaw} /></strong></div></div>}
               <ReleaseProgress award={detail.award} block={network.finalizedBlock} connected={networkReady} />
-              <p className="fine-print">Native vesting transfers funds upfront and locks their use. Unlocking updates the wallet’s vesting lock. Its balance may include other awards.</p>
-              {detail.award.status === 'funded' && <><div className="unlock-box"><div><span>Eligible to unlock in recipient wallet</span><strong>{detail.wallet ? <Money raw={detail.wallet.eligibleUnlockRaw} /> : 'Waiting for chain data'}</strong></div><button className="btn btn-primary" disabled={!networkReady || busy || !detail.wallet || BigInt(detail.wallet.eligibleUnlockRaw) === 0n} onClick={() => prepareAction('unlock')}><ArrowDownLeft size={15} />{address === detail.award.recipient ? 'Unlock my funds' : 'Unlock for recipient'}</button></div><p className="unlock-explanation">Funds stay in the recipient’s wallet. The account that signs pays the network fee. {detail.wallet && BigInt(detail.wallet.vestingLockRaw) === 0n && network.finalizedBlock >= detail.award.endBlock ? 'The recipient’s vesting lock is already cleared.' : ''}</p></>}
+              {detail.award.lockedRaw !== '0' && <p className="fine-print">Native vesting transfers funds upfront and locks their use. Unlocking updates the wallet’s vesting lock. Its balance may include other awards.</p>}
+              {detail.award.status === 'funded' && detail.award.lockedRaw !== '0' && <><div className="unlock-box"><div><span>Eligible to unlock in recipient wallet</span><strong>{detail.wallet ? <Money raw={detail.wallet.eligibleUnlockRaw} /> : 'Waiting for chain data'}</strong></div><button className="btn btn-primary" disabled={!networkReady || busy || !detail.wallet || BigInt(detail.wallet.eligibleUnlockRaw) === 0n} onClick={() => prepareAction('unlock')}><ArrowDownLeft size={15} />{address === detail.award.recipient ? 'Unlock my funds' : 'Unlock for recipient'}</button></div><p className="unlock-explanation">Funds stay in the recipient’s wallet. The account that signs pays the network fee. {detail.wallet && BigInt(detail.wallet.vestingLockRaw) === 0n && network.finalizedBlock >= detail.award.endBlock ? 'The recipient’s vesting lock is already cleared.' : ''}</p></>}
             </div></section>
             <section className="panel"><div className="panel-heading"><h2>On-chain activity</h2><span className="subtle-label">{detail.receipts.length} finalized</span></div>{detail.receipts.length ? <div className="activity-list">{detail.receipts.map(receipt => <div className="activity-row" key={receipt.txHash}><span className={'activity-icon ' + (receipt.kind === 'failed' ? 'failed' : '')}>{receipt.kind === 'failed' ? <AlertCircle size={16} /> : <Check size={16} />}</span><div><strong>{receipt.kind === 'funding' ? 'Award funded' : receipt.kind === 'approval' ? 'Approval recorded' : receipt.kind === 'unlock' ? 'Vested funds unlocked' : receipt.kind === 'cancellation' ? 'Proposal cancelled' : 'Payment failed'}</strong><small>Block #{receipt.blockNumber.toLocaleString()} · {shortAddress(receipt.signer)}</small><button className="hash-link" title={receipt.txHash} onClick={() => void copy(receipt.txHash)}>{shortAddress(receipt.txHash)}<Copy size={11} /></button></div><div className="activity-fee"><Money raw={receipt.feeRaw} /><small>Network fee</small></div></div>)}</div> : <div className="activity-empty"><Clock3 size={16} /><p>Finalized approvals and payments will appear here.</p></div>}</section>
           </div><aside className="detail-aside">
@@ -259,6 +270,11 @@ export default function App() {
             <div className="commitment-note"><ShieldCheck size={17} /><p>Once funded, the sender cannot cancel this native vesting schedule. Funds are committed to the recipient.</p></div>
           </aside></div>
         </> : <div className="loading-detail"><LoaderCircle className="spin" size={22} /><p>Loading award from PortaFlow…</p></div>)}
+        {(page === 'rounds' || page === 'approvals') && <RoundList rounds={page === 'approvals' ? rounds.filter(r => ['draft', 'awaiting_approval'].includes(r.status)) : rounds} open={id => go('round', id)} />}
+        {page === 'round' && <RoundPage id={awardId} block={network.finalizedBlock} network={network} address={address} busy={busy} back={() => go('rounds')} onWallet={openWallet} refresh={refresh} onReview={value => { setReview(value); setModal('review'); }} />}
+        {page === 'ledger' && <LedgerPage key={treasury?.id} treasury={treasury} block={network.finalizedBlock} />}
+        {page === 'my-funds' && <RecipientPage address={address} block={network.finalizedBlock} networkReady={networkReady} onWallet={openWallet} open={(id, round) => go(round ? 'round' : 'award', id)} onReview={value => { setReview(value); setModal('review'); }} />}
+        {page === 'verify' && <VerifyPage />}
         <footer className="workspace-footer"><span><span className={'connection-dot ' + (networkReady ? 'online' : '')} />{networkReady ? 'Connected to Portaldot V3' : 'Waiting for network'}</span><span>{network.finalizedBlock > 0 ? 'Finalized #' + network.finalizedBlock.toLocaleString() : 'Checking finalized head'}<span className="footer-divider">/</span>Funds stay on-chain</span></footer>
       </main>
     </div>
@@ -282,9 +298,11 @@ export default function App() {
     </Modal>}
     {modal === 'treasury' && <TreasuryForm address={address || ''} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<Treasury>('/treasuries', values); setTreasuryId(created.id); localStorage.setItem('portaflow-treasury', created.id); setModal(null); await refresh(); go('treasury'); setToast('Treasury workspace created'); })} />}
     {modal === 'award' && treasury && <AwardForm treasury={treasury} network={network} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<Award>('/awards', values); setModal(null); await refresh(); go('award', created.id); setToast('Award ready for treasury approval'); })} />}
+    {modal === 'round' && treasury && <Modal title="Create a payout round" eyebrow={treasury.name.toUpperCase()} wide close={() => setModal(null)} busy={busy}><RoundForm treasury={treasury} network={network} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<PayoutRound>('/rounds', values); setModal(null); await refresh(); go('round', created.id); setToast('Payout round ready for shared approval'); })} /></Modal>}
     {modal === 'import' && treasury && <ImportForm treasury={treasury} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const result = await request<{ awards: Award[] }>('/awards/import', values); setModal(null); await refresh(); go('awards'); setToast(result.awards.length + ' award drafts imported'); })} />}
     {modal === 'fund' && treasury && <FundingForm treasury={treasury} busy={busy} close={() => setModal(null)} submit={amount => void act(async () => { const plan = await request<TransactionPlan>('/treasuries/' + treasury.id + '/funding-plan', { amount }); setReview({ plan, treasury, amountRaw: parseAmount(amount).toString() }); setModal('review'); })} />}
-    {modal === 'review' && review && <Modal title="Review transaction" eyebrow={review.plan.kind.toUpperCase()} busy={busy} close={() => setModal(null)}><div className="review-target"><ShieldCheck size={23} /><div><strong>{review.award?.title || (review.plan.kind === 'treasury funding' ? 'Fund ' + review.treasury?.name : 'Unlock vested funds')}</strong><small>{review.plan.kind === 'approval' ? 'Records your approval. A later signer completes funding.' : review.plan.kind === 'funding' ? 'This signature executes the approved award.' : 'Signed in your native wallet.'}</small></div></div>
+    {modal === 'review' && review && <Modal title="Review transaction" eyebrow={review.plan.kind.toUpperCase()} busy={busy} wide={Boolean(review.round)} close={() => setModal(null)}><div className="review-target"><ShieldCheck size={23} /><div><strong>{review.round?.title || review.award?.title || (review.plan.kind === 'treasury funding' ? 'Fund ' + review.treasury?.name : 'Unlock vested funds')}</strong><small>{review.plan.kind === 'approval' ? 'Records your approval. A later signer completes funding.' : review.plan.kind === 'funding' ? 'This signature executes the approved payments atomically.' : 'Signed in your native wallet.'}</small></div></div>
+      {review.round && <><div className="op-round-totals"><div><span>Total · {review.round.awards.length} payments</span><Money raw={review.round.totalRaw} /></div><div><span>Immediate</span><Money raw={review.round.upfrontRaw} /></div><div><span>Vested</span><Money raw={review.round.lockedRaw} /></div></div><div className="op-review-payments">{review.round.awards.map(a => <div key={a.id}><span><strong>{a.title}</strong><code>{a.recipient}</code><small>{a.lockedRaw === '0' ? '100% immediate' : formatAmount(a.upfrontRaw) + ' immediate · ' + formatAmount(a.lockedRaw) + ' vested · #' + a.startBlock + ' → #' + a.endBlock}</small></span><Money raw={a.totalRaw} /></div>)}</div><p className="fine-print">Terms hash</p><code className="op-hash">{review.round.termsHash}</code></>}
       <dl className="review-details">{review.award && review.plan.kind !== 'unlock' && <><div><dt>Total award</dt><dd><Money raw={review.award.totalRaw} /></dd></div><div><dt>Immediate / vested</dt><dd>{formatAmount(review.award.upfrontRaw)} / {formatAmount(review.award.lockedRaw)} tPOT</dd></div><div><dt>Start / end block</dt><dd>#{review.award.startBlock} / #{review.award.endBlock}</dd></div></>}{review.recipient && <div><dt>Recipient</dt><dd title={review.recipient}>{shortAddress(review.recipient)}</dd></div>}{review.plan.kind === 'unlock' && <div><dt>Action</dt><dd>Update recipient’s vesting lock</dd></div>}{review.amountRaw && <div><dt>Transfer amount</dt><dd><Money raw={review.amountRaw} /></dd></div>}<div><dt>Signing wallet / fee payer</dt><dd>{shortAddress(review.plan.signer)}</dd></div><div><dt>Estimated network fee</dt><dd><Money raw={review.plan.feeRaw} /></dd></div>{BigInt(review.plan.depositRaw) > 0n && <div><dt>Refundable approval deposit</dt><dd><Money raw={review.plan.depositRaw} /></dd></div>}<div><dt>Network</dt><dd>Portaldot V3 Testnet</dd></div></dl>
       <p className="fine-print">The browser verifies the encoded transaction against these terms before opening your wallet. Your wallet may first ask to add Portaldot’s network details. Network fees are estimates; the wallet shows the final signing request.</p><div className="modal-footer"><button className="btn btn-outline" disabled={busy} onClick={() => setModal(null)}>Back</button><button className="btn btn-primary" disabled={busy} onClick={submitReview}>{busy ? <LoaderCircle size={15} className="spin" /> : <Wallet size={15} />}{busy ? progress || 'Preparing wallet…' : 'Confirm in wallet'}</button></div>
     </Modal>}
@@ -321,11 +339,11 @@ function AwardForm({ treasury, network, busy, close, submit }: { treasury: Treas
   return <Modal title="Create an award" eyebrow={treasury.name.toUpperCase()} close={close} busy={busy}><form onSubmit={e => { e.preventDefault(); submit({ treasuryId: treasury.id, title, recipient, amount, upfront: upfront === 0n ? '0' : decimal(upfront), durationBlocks: demo ? 10 : Math.round(Number(duration) * 86400 / network.blockSeconds), startDelayBlocks: demo ? 10 : Math.round(Number(delayHours) * 3600 / network.blockSeconds), workUrl: reference, acceptedCommitment: accepted }); }}>
     <label className="field-label">Award title<input className="input" required maxLength={100} placeholder="e.g. Developer documentation grant" value={title} onChange={e => setTitle(e.target.value)} /></label>
     <label className="field-label">Recipient’s native address<input className="input mono-input" required maxLength={64} placeholder="5…" value={recipient} onChange={e => setRecipient(e.target.value)} /></label>
-    <div className="form-columns"><label className="field-label">Total award<div className="amount-input"><input className="input" required inputMode="decimal" placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)} /><span>tPOT</span></div></label><label className="field-label">Immediate payment<select className="select" value={percent} onChange={e => setPercent(Number(e.target.value))}>{[0, 10, 20, 25, 50].map(value => <option key={value} value={value}>{value}% upfront</option>)}</select></label></div>
+    <div className="form-columns"><label className="field-label">Total award<div className="amount-input"><input className="input" required inputMode="decimal" placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)} /><span>tPOT</span></div></label><label className="field-label">Immediate payment<select className="select" value={percent} onChange={e => setPercent(Number(e.target.value))}>{[0, 10, 20, 25, 50, 100].map(value => <option key={value} value={value}>{value}% upfront</option>)}</select></label></div>
     <div className="form-split"><div><span>Immediate</span><Money raw={upfront.toString()} /></div><div><span>Vested</span><Money raw={(total - upfront).toString()} /></div></div>
-    <label className="field-label">Release duration<select className="select" value={duration} onChange={e => setDuration(e.target.value)}><option value="7">About 7 days</option><option value="30">About 30 days</option><option value="90">About 90 days</option><option value="testnet">Short testnet schedule · 10 blocks</option></select></label>
+    {percent < 100 && <><label className="field-label">Release duration<select className="select" value={duration} onChange={e => setDuration(e.target.value)}><option value="7">About 7 days</option><option value="30">About 30 days</option><option value="90">About 90 days</option><option value="testnet">Short testnet schedule · 10 blocks</option></select></label>
     {!demo && <label className="field-label">Start after creation<select className="select" value={delayHours} onChange={e => setDelayHours(e.target.value)}><option value="1">About 1 hour</option><option value="6">About 6 hours</option><option value="24">About 24 hours</option><option value="72">About 3 days</option><option value="168">About 7 days</option></select></label>}
-    <p className="field-help">{demo ? 'Starts 10 finalized blocks after creation; vests over 10 testnet blocks. Timing depends on block production. Complete all approvals before its start block.' : 'All signers must approve before the start block. Dates are estimates; the fixed block schedule is shown before approval.'}</p>
+    <p className="field-help">{demo ? 'Starts 10 blocks after creation; vests over 10 testnet blocks. Timing depends on block production. Complete all approvals before its start block.' : 'All signers must approve before the start block. Dates are estimates; the fixed block schedule is shown before approval.'}</p></>}
     <label className="field-label">Work reference <span className="optional">optional · public</span><input className="input" type="url" maxLength={500} placeholder="https://github.com/…" value={reference} onChange={e => setReference(e.target.value)} /></label>
     <label className="commitment-checkbox"><input className="checkbox checkbox-sm" type="checkbox" checked={accepted} required onChange={e => setAccepted(e.target.checked)} /><span>I understand that once funded, the vested funds are committed to the recipient and cannot be cancelled by the sender.</span></label>
     <div className="modal-footer"><button type="button" className="btn btn-outline" disabled={busy} onClick={close}>Cancel</button><button className="btn btn-primary" disabled={busy || !network.verified || !accepted}>{busy && <LoaderCircle size={15} className="spin" />}Create award <ArrowRight size={14} /></button></div></form></Modal>;
