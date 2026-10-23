@@ -164,3 +164,17 @@ test('approval reloads the round after catch-up and refuses a payout already exe
   try { await assert.rejects(chain.roundApprovalPlan(r, treasury, native(1)), /already been finalized/); }
   finally { chain.api = undefined; await store.close(); }
 });
+
+test('API preserves synchronization 503 responses so temporary backlog is not treated as invalid input', async () => {
+  const store = new Store(':memory:'), chain = new Chain(store, undefined, false);
+  await store.saveTreasury(treasury); await store.saveRound(round());
+  const token = 'b'.repeat(64);
+  await store.saveSession(sessionHash(token), { address: native(1), expires: Date.now() + 60_000 });
+  chain.roundApprovalPlan = async () => { throw Object.assign(new Error('Synchronizing payout history'), { statusCode: 503 }); };
+  const { app } = await createApp({ store, chain, connect: false, serve: false });
+  try {
+    const result = await app.inject({ method: 'POST', url: '/api/rounds/round/approval-plan', headers: { cookie: 'portaflow_session=' + token }, payload: {} });
+    assert.equal(result.statusCode, 503);
+    assert.match(result.json().error, /Synchronizing/);
+  } finally { await app.close(); }
+});

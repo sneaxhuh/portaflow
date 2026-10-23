@@ -5,11 +5,11 @@ import { Store } from '../server/store';
 import { Chain } from '../server/chain';
 import { NETWORK } from '../shared/types';
 
-function fixture() {
+function fixture(head = 161) {
   const store = new Store(':memory:'), chain = new Chain(store, undefined, false);
   const visited: number[] = [];
   chain.state.verified = true;
-  chain.refreshHead = async () => { chain.state.finalizedBlock = 161; };
+  chain.refreshHead = async () => { chain.state.finalizedBlock = head; };
   chain.api = {
     isConnected: true,
     rpc: { chain: { getBlockHash: async (height: number) => { visited.push(height); return height; } } },
@@ -19,13 +19,35 @@ function fixture() {
 }
 
 test('approval drains multiple serverless scan batches without skipping any persisted history', async () => {
-  const { store, chain, visited } = fixture();
+  const { store, chain, visited } = fixture(661);
   try {
     await store.setMeta('cursor:' + NETWORK.genesis, '100');
     await Promise.all([chain.synchronizeForApproval(), chain.synchronizeForApproval()]);
-    assert.equal(chain.state.lastSyncedBlock, 161);
+    assert.equal(chain.state.lastSyncedBlock, 661);
+    assert.equal(await store.getMeta('cursor:' + NETWORK.genesis), '661');
+    assert.deepEqual(visited, Array.from({ length: 561 }, (_, i) => i + 101));
+  } finally { chain.api = undefined; await store.close(); }
+});
+
+test('scanner checkpoints complete windows and resumes after a failed RPC without skipping blocks', async () => {
+  const { store, chain } = fixture();
+  let fail = true, checkpoints = 0;
+  const setMeta = store.setMeta.bind(store);
+  store.setMeta = async (key, value) => { if (key.startsWith('cursor:')) checkpoints++; await setMeta(key, value); };
+  (chain.api!.rpc.chain.getBlockHash as any) = async (height: number) => {
+    if (fail && height === 119) throw new Error('RPC unavailable');
+    return height;
+  };
+  try {
+    await store.setMeta('cursor:' + NETWORK.genesis, '100');
+    await chain.refreshHead();
+    await assert.rejects(chain.scan(), /RPC unavailable/);
+    assert.equal(await store.getMeta('cursor:' + NETWORK.genesis), '112');
+    assert.equal(chain.state.lastSyncedBlock, 112);
+    fail = false;
+    await chain.scan();
     assert.equal(await store.getMeta('cursor:' + NETWORK.genesis), '161');
-    assert.deepEqual(visited, Array.from({ length: 61 }, (_, i) => i + 101));
+    assert.equal(checkpoints, 7, 'initial cursor plus six completed windows, not one write per block');
   } finally { chain.api = undefined; await store.close(); }
 });
 

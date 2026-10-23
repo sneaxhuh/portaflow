@@ -322,36 +322,33 @@ export class Chain {
     let cursor = Number(savedCursor ?? earliestRelevantBlock);
     this.state.lastSyncedBlock = cursor;
     if (await this.store.getMeta('ledger:from') === undefined) await this.store.setMeta('ledger:from', String(cursor + 1));
-    const end = Math.min(this.state.finalizedBlock, cursor + (this.background ? 120 : 24));
-    // Fetch a small window concurrently, but apply receipts and persist the
-    // cursor in block order. A failed request never skips an unprocessed block.
-    for (let windowStart = cursor + 1; windowStart <= end; windowStart += 6) {
-      const blocks = await Promise.all(Array.from({ length: Math.min(6, end - windowStart + 1) }, async (_, offset) => {
+    const end = Math.min(this.state.finalizedBlock, cursor + (this.background ? 600 : 240));
+    const deadline = Date.now() + (this.background ? 20_000 : 6_000);
+    // Checkpoint complete windows, not individual blocks. Atlas round trips
+    // otherwise dominate catching up after idle time. Replayed windows are
+    // safe because ledger entries and receipts have deterministic unique IDs.
+    for (let windowStart = cursor + 1; windowStart <= end; windowStart += 12) {
+      if (!await this.store.acquireLease('chain:' + NETWORK.genesis, owner, 120_000)) return;
+      const blocks = await Promise.all(Array.from({ length: Math.min(12, end - windowStart + 1) }, async (_, offset) => {
         const blockNumber = windowStart + offset;
         const hash = await api.rpc.chain.getBlockHash(blockNumber);
         const records: any = await api.query.system.events.at(hash);
         return { blockNumber, hash, records };
       }));
       for (const { blockNumber, hash, records } of blocks) {
-      if (!await this.store.acquireLease('chain:' + NETWORK.genesis, owner, 120_000)) return;
-      // Most blocks have no award activity. Avoid downloading their extrinsics
-      // or constructing a historical API just to advance the receipt cursor.
-      const relevant = records.some(({ event }: any) => event.section === 'multisig' || event.section === 'balances' && event.method === 'Transfer'
-        || event.section === 'vesting' && ['VestingUpdated', 'VestingCompleted'].includes(event.method));
-      if (!relevant) {
+        // Most blocks have no award activity. Avoid downloading their extrinsics
+        // or constructing a historical API just to advance the receipt cursor.
+        const relevant = records.some(({ event }: any) => event.section === 'multisig' || event.section === 'balances' && event.method === 'Transfer'
+          || event.section === 'vesting' && ['VestingUpdated', 'VestingCompleted'].includes(event.method));
+        if (relevant) await this.indexBlock(hash.toHex(), blockNumber, records);
         cursor = blockNumber;
-        await this.store.setMeta(cursorKey, String(cursor));
-        this.state.lastSyncedBlock = cursor;
-        continue;
       }
-      await this.indexBlock(hash.toHex(), blockNumber, records);
-      cursor = blockNumber;
+      // Do not advance past any failed fetch or index operation. A retry
+      // starts at the last completely persisted window.
       await this.store.setMeta(cursorKey, String(cursor));
       this.state.lastSyncedBlock = cursor;
-      }
+      if (Date.now() >= deadline) break;
     }
-    await this.store.setMeta(cursorKey, String(cursor));
-    this.state.lastSyncedBlock = cursor;
   }
   private async indexBlock(blockHash: string, blockNumber: number, suppliedRecords?: any, txHash?: string) {
       const api = this.requireApi();

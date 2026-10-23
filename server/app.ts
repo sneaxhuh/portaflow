@@ -57,7 +57,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
       const duplicate = (failure as Error & { code?: number }).code === 11000;
       return reply.code(duplicate ? 409 : 503).send({ error: duplicate ? 'This record already exists. Refresh before retrying.' : 'The database is temporarily unavailable. Please try again shortly.' });
     }
-    const status = failure.statusCode && failure.statusCode >= 400 && failure.statusCode < 500 ? failure.statusCode : 400;
+    const status = failure.statusCode && failure.statusCode >= 400 && failure.statusCode < 600 ? failure.statusCode : 400;
     void reply.code(status).send({ error: failure.message || 'The request could not be completed.' });
   });
   function auth(request: any) {
@@ -186,8 +186,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     if (award.status === 'draft') {
       if (award.createdBy !== signer) throw new Error('Only the author can discard this draft.');
       if (award.callHex) {
-        await chain.refresh();
-        if (chain.state.lastSyncedBlock < chain.state.finalizedBlock) throw new Error('Catching up with finalized blocks. Try again shortly.');
+        await chain.synchronizeForApproval();
       }
       const latest = await getAward(award.id);
       const pending = award.callHex ? await chain.pending(await getTreasury(award.treasuryId), latest) : null;
