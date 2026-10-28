@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": false, "allowImportingTsExtensions": false, "declaration": true, "outDir": "sdk/dist", "rootDir": "." },
+  "include": ["sdk/index.ts", "shared/**/*.ts"],
+  "exclude": ["sdk/dist"]
+}

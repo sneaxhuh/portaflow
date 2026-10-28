@@ -24,7 +24,7 @@ export type NetworkState = {
   finalizedBlock: number; bestBlock: number; specVersion: number;
   blockSeconds: number; existentialDepositRaw: string; minVestedRaw: string;
   maxSchedules: number; depositBaseRaw: string; depositFactorRaw: string;
-  lastSyncedBlock: number; error?: string; sponsorEnabled: boolean;
+  lastSyncedBlock: number; error?: string; historyError?: string; sponsorEnabled: boolean;
 };
 export type WalletState = {
   address: string; freeRaw: string; reservedRaw: string; frozenRaw: string;
@@ -51,10 +51,12 @@ export type AwardDetail = {
 export type TransactionPlan = {
   callHex: string; feeRaw: string; depositRaw: string; signer: string;
   genesis: string; specVersion: number; kind: string;
+  storageDepositRaw?: string;
 };
 export type Overview = {
   network: NetworkState; treasuries: Treasury[]; awards: Award[];
   rounds?: PayoutRound[];
+  invoiceBatches?: import('./invoices.js').InvoiceBatch[];
   session: { address: string } | null;
 };
 
@@ -79,6 +81,7 @@ export type TreasuryLedger = {
   pendingRaw: string; draftsRaw: string; fundedRaw: string; signerFeesRaw: string;
   pendingDeposits: { proposalId: string; title: string; depositor: string; amountRaw: string }[];
   historyAvailable: boolean;
+  historyError?: string;
 };
 export type ReceiptBundle = {
   application: 'PortaFlow'; version: 1 | 2; network: typeof NETWORK; treasury: Treasury;
@@ -91,4 +94,15 @@ export type Verification = {
 export type RecipientPortal = {
   address: string; wallet: WalletState; awards: (Award & { roundId?: string; treasuryName: string })[];
   totalFundedRaw: string; totalImmediateRaw: string; totalVestedRaw: string;
+};
+
+export type ProgramReport = {
+  version: 1; network: typeof NETWORK; treasury: Treasury; generatedAt: string;
+  finalizedBlock: number; indexedBlock: number; historySynced: boolean;
+  totals: { fundedRaw: string; immediateRaw: string; vestedRaw: string; remainingScheduledRaw: string;
+    earnedByScheduleRaw: string; paymentCount: number; recipientCount: number; fundingTransactions: number;
+    pendingProposals: number; draftProposals: number };
+  payments: { id: string; roundId?: string; roundTitle?: string; title: string; recipient: string; workUrl: string;
+    totalRaw: string; upfrontRaw: string; lockedRaw: string; remainingRaw: string; startBlock: number; endBlock: number;
+    fundingTx: string; fundingBlock: number; receiptPath: string }[];
 };

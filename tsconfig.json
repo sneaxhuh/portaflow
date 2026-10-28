@@ -7,5 +7,5 @@
     "esModuleInterop": true, "types": ["node"],
     "baseUrl": ".", "paths": { "@/*": ["./web/*"] }
   },
-  "include": ["web", "server", "shared", "api", "scripts", "tests", "vite.config.ts"]
+  "include": ["web", "server", "shared", "api", "scripts", "tests", "sdk/index.ts", "examples", "vite.config.ts"]
 }
