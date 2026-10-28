@@ -1,11 +1,15 @@
 import type { ApiPromise } from '@polkadot/api';
 import type { Signer } from '@polkadot/api/types';
-import { base64Encode, decodeAddress, encodeAddress, createKeyMulti } from '@polkadot/util-crypto';
+import { base64Encode, decodeAddress, encodeAddress, cryptoWaitReady } from '@polkadot/util-crypto';
 import { stringToHex, u8aToHex } from '@polkadot/util';
-import { fundingCall, roundFundingCall, transactionFromCall } from '../shared/calls';
-import { NETWORK, type Award, type PayoutRound, type TransactionPlan, type Treasury } from '../shared/types';
+import { transactionFromCall } from '../shared/calls';
+import { validatePlan, type PlanContext } from '../shared/validation';
+export { validatePlan } from '../shared/validation';
+import { NETWORK, type TransactionPlan } from '../shared/types';
 import { request } from './api';
 import { rememberReceipt } from './receipts';
+import { invoiceMessage, invoiceTermsHash, verifyInvoiceSignature, type Invoice } from '../shared/invoices';
+import { matchesRuntimeCode } from '../shared/runtime-code';
 export { syncFinalizedReceipts } from './receipts';
 export { request } from './api';
 
@@ -79,48 +83,38 @@ export async function login(account: NativeAccount) {
   localStorage.setItem('portaflow-wallet-source', account.meta.source);
   return result;
 }
+export async function signInvoice(invoice: Invoice): Promise<string> {
+  await cryptoWaitReady();
+  if(invoice.termsHash!==invoiceTermsHash(invoice))throw new Error('The invoice terms hash is invalid.');
+  const account = (await accounts()).find(a=>same(a.address,invoice.issuer));
+  if (!account) throw new Error('Connect the contributor wallet for this invoice.');
+  const extension = await extensionFromSource(account.meta.source);
+  if (!extension.signer.signRaw) throw new Error('This wallet cannot sign a payment request.');
+  const { signature } = await extension.signer.signRaw({address:account.signingAddress,data:stringToHex(invoiceMessage(invoice)),type:'bytes'});
+  if (!verifyInvoiceSignature({...invoice,signature:signature as `0x${string}`})) throw new Error('The wallet did not return a valid invoice signature.');
+  return signature;
+}
 let apiPromise: Promise<ApiPromise> | undefined;
 async function chainApi() {
   if (!apiPromise) apiPromise = import('@polkadot/api').then(({ ApiPromise, WsProvider }) =>
     ApiPromise.create({ provider: new WsProvider(NETWORK.rpc), noInitWarn: true })).catch(error => { apiPromise = undefined; throw error; });
   return apiPromise;
 }
-type Context = { award?: Award; round?: PayoutRound; treasury?: Treasury; recipient?: string; amountRaw?: string };
-export function validatePlan(api: ApiPromise, plan: TransactionPlan, context: Context) {
-  if (api.genesisHash.toHex() !== NETWORK.genesis || plan.genesis !== NETWORK.genesis) throw new Error('Network verification failed.');
-  if (api.runtimeVersion.specVersion.toNumber() !== plan.specVersion) throw new Error('The runtime changed. Refresh this transaction before signing.');
-  const decoded: any = transactionFromCall(api, plan.callHex).method;
-  const address = (codec: any) => normalize(codec.isId ? codec.asId.toString() : codec.toString());
-  if ((context.award || context.round) && context.treasury && ['approval', 'funding', 'cancellation'].includes(plan.kind)) {
-    const treasury = context.treasury;
-    if (!treasury.signatories.some(a => same(a, plan.signer))) throw new Error('The selected wallet is not a signer of this treasury.');
-    const expectedAddress = encodeAddress(createKeyMulti(treasury.signatories, treasury.threshold), 42);
-    if (!same(expectedAddress, treasury.address)) throw new Error('The treasury signer configuration does not match its address.');
-    const expectedMethod = plan.kind === 'approval' ? 'approveAsMulti' : plan.kind === 'funding' ? 'asMulti' : 'cancelAsMulti';
-    if (decoded.section !== 'multisig' || decoded.method !== expectedMethod || Number(decoded.args[0].toString()) !== treasury.threshold) throw new Error('Unexpected treasury transaction.');
-    const others: string[] = decoded.args[1].map((a: any) => normalize(a.toString()));
-    const expected = treasury.signatories.filter(a => !same(a, plan.signer));
-    if (others.length !== expected.length || others.some((a, i) => !same(a, expected[i]))) throw new Error('The other signers do not match this treasury.');
-    // Cancellation must still work after a runtime upgrade, when rebuilding
-    // the old proposal with current metadata can produce a different call.
-    const batch = plan.kind === 'cancellation' ? undefined : context.round ? roundFundingCall(api, context.round, treasury) : fundingCall(api, context.award!, treasury);
-    const expectedCall = plan.kind === 'cancellation' ? (context.round ?? context.award)!.callHash
-      : plan.kind === 'funding' ? batch!.method.toHex() : batch!.method.hash.toHex();
-    if (!expectedCall || decoded.args[3].toHex() !== expectedCall) {
-      throw new Error('The encoded payment does not match the terms displayed.');
-    }
-  } else if (plan.kind === 'treasury funding' && context.treasury) {
-    if (decoded.section !== 'balances' || decoded.method !== 'transferKeepAlive' || !same(address(decoded.args[0]), context.treasury.address) || decoded.args[1].toString() !== context.amountRaw) throw new Error('The treasury funding transfer does not match the requested payment.');
-  } else if (plan.kind === 'unlock' && context.recipient) {
-    if (decoded.section !== 'vesting' || decoded.method !== 'vestOther' || !same(address(decoded.args[0]), context.recipient)) throw new Error('Unexpected unlock transaction.');
-  } else throw new Error('Unsupported transaction plan.');
-}
-export async function signTransaction(plan: TransactionPlan, context: Context, onProgress: (status: string) => void) {
+export async function signTransaction(plan: TransactionPlan, context: PlanContext, onProgress: (status: string) => void) {
+  await cryptoWaitReady();
   const api = await chainApi();
   const available = await accounts();
   const account = available.find(a => same(a.address, plan.signer));
   if (!account) throw new Error('Select the same signing wallet used to prepare this transaction.');
   validatePlan(api, plan, context);
+  if (context.invoiceBatch && plan.kind !== 'cancellation') {
+    const snapshot = await api.at(await api.rpc.chain.getFinalizedHead());
+    const code: any = await (snapshot.call as any).reviveApi.code(context.invoiceBatch.router);
+    if (!matchesRuntimeCode(code.toHex(),context.invoiceBatch.runtimeCodeHash)) throw new Error('Settlement contract bytecode changed. No payment was signed.');
+    for (const [native,evm] of [[context.treasury!.address,context.invoiceBatch.payer],...context.invoiceBatch.invoices.map((i,n)=>[i.recipient,context.invoiceBatch!.recipients[n]])]) {
+      if (!same((await (snapshot.call as any).reviveApi.accountId(evm)).toString(),native)) throw new Error('Payment account mapping changed. Review this batch again.');
+    }
+  }
   const extension = await extensionFromSource(account.meta.source);
   if (extension.metadata) {
     const metadataKey = `${account.meta.source}:${NETWORK.genesis}:${plan.specVersion}`;
@@ -165,6 +159,8 @@ export async function signTransaction(plan: TransactionPlan, context: Context, o
         : plan.kind === 'approval' ? has('multisig', ['NewMultisig', 'MultisigApproval'])
         : plan.kind === 'cancellation' ? has('multisig', ['MultisigCancelled'])
         : plan.kind === 'treasury funding' ? has('balances', ['Transfer'])
+        : plan.kind === 'invoice mapping' ? has('system', ['ExtrinsicSuccess'])
+        : plan.kind === 'settlement deployment' ? has('revive', ['Instantiated'])
         : has('vesting', ['VestingUpdated', 'VestingCompleted']);
       if (!confirmed) return finish(new Error('The transaction finalized without the expected action event. Refresh its on-chain state before submitting another transaction.'));
       finish(undefined, result.txHash.toHex());

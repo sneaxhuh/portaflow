@@ -139,6 +139,84 @@ body.portaflow-redesign .op-hash { margin: 0; font-size: 11px; line-height: 1.8;
 body.portaflow-redesign .op-release-cell { min-width: 180px; }
 body.portaflow-redesign td.op-release-cell { display: table-cell; vertical-align: middle; }
 body.portaflow-redesign .op-release-cell small { white-space: normal; line-height: 1.6; }
+body.portaflow-redesign .program-report-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+body.portaflow-redesign .program-report-heading > div { min-width: 0; }
+body.portaflow-redesign .program-report-heading [data-slot=card-title] { margin: 14px 0 8px; font-size: 24px; overflow-wrap: anywhere; }
+body.portaflow-redesign .program-address { display: block; margin-top: 12px; font-size: 12px; color: var(--pf-muted); overflow-wrap: anywhere; }
+body.portaflow-redesign .program-report [data-slot=card-title] { display: flex; align-items: center; gap: 8px; }
+body.portaflow-redesign .program-split { display: grid; gap: 2px; }
+body.portaflow-redesign .program-split small { color: var(--pf-muted); }
+body.portaflow-redesign .program-notes p { margin: 0 0 12px; font-size: 13px; line-height: 1.7; color: var(--pf-ink-2); }
+body.portaflow-redesign .program-notes p:last-child { margin-bottom: 0; }
+body.portaflow-redesign .program-notes a { text-decoration: underline; }
+body.portaflow-redesign .program-builder-links { display: flex; flex-wrap: wrap; gap: 14px 26px; }
+body.portaflow-redesign .program-endpoint { display: block; font-size: 12px; color: var(--pf-ink-2); overflow-wrap: anywhere; margin-bottom: 14px; }
+body.portaflow-redesign .program-builder-links a { display: inline-flex; align-items: center; gap: 6px; color: var(--pf-ink-2); font-size: 13px; text-decoration: underline; }
+body.portaflow-redesign .invoice-workbench { display: grid; gap: 22px; min-width: 0; }
+body.portaflow-redesign .invoice-intro, body.portaflow-redesign .invoice-detail-title { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 6px 0 12px; }
+body.portaflow-redesign .invoice-intro > div, body.portaflow-redesign .invoice-detail-title > div { min-width: 0; }
+body.portaflow-redesign .invoice-intro h2, body.portaflow-redesign .invoice-detail-title h2 { font-size: 27px; font-weight: 550; letter-spacing: -.8px; margin: 12px 0 8px; overflow-wrap: anywhere; }
+body.portaflow-redesign .invoice-intro p, body.portaflow-redesign .invoice-detail-title p { font-size: 13px; color: var(--pf-muted); }
+body.portaflow-redesign .invoice-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--pf-rule); overflow-x: auto; }
+body.portaflow-redesign .invoice-tabs button { padding: 12px 0 14px; color: var(--pf-muted); font-size: 13px; white-space: nowrap; border-bottom: 2px solid transparent; }
+body.portaflow-redesign .invoice-tabs button[aria-selected=true] { color: var(--pf-ink); border-bottom-color: var(--pf-ink); }
+body.portaflow-redesign .invoice-tabs button span { margin-left: 8px; background: var(--pf-surface-2, var(--pf-canvas)); border: 1px solid var(--pf-rule); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
+body.portaflow-redesign .invoice-empty { display: grid; justify-items: center; gap: 10px; text-align: center; padding: 48px 24px; color: var(--pf-muted); }
+body.portaflow-redesign .invoice-empty h3 { font-size: 15px; color: var(--pf-ink); }
+body.portaflow-redesign .invoice-empty p { font-size: 13px; max-width: 430px; line-height: 1.7; }
+body.portaflow-redesign .invoice-notice, body.portaflow-redesign .invoice-setup, body.portaflow-redesign .invoice-paid { display: flex; gap: 12px; align-items: start; padding: 16px 18px; border: 1px solid var(--pf-rule); border-radius: 7px; background: var(--pf-surface); color: var(--pf-ink-2); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+body.portaflow-redesign .invoice-notice { border-color: var(--pf-warn-border); color: var(--pf-warn); }
+body.portaflow-redesign .invoice-setup > svg, body.portaflow-redesign .invoice-paid > svg { flex-shrink: 0; margin-top: 2px; }
+body.portaflow-redesign .invoice-setup strong, body.portaflow-redesign .invoice-paid strong { font-weight: 550; color: var(--pf-ink); }
+body.portaflow-redesign .invoice-setup p { color: var(--pf-muted); margin-top: 3px; }
+body.portaflow-redesign .invoice-amount { font-variant-numeric: tabular-nums; font-weight: 550; white-space: nowrap; }
+body.portaflow-redesign .invoice-amount small { display: inline; font-weight: 400; color: var(--pf-muted); margin-left: 3px; }
+body.portaflow-redesign .invoice-total { font-size: 34px; letter-spacing: -.8px; margin: 8px 0 2px; overflow-wrap: anywhere; }
+body.portaflow-redesign .invoice-total .invoice-amount { white-space: normal; }
+body.portaflow-redesign .invoice-total small { font-size: 18px; letter-spacing: -.2px; }
+body.portaflow-redesign .invoice-row-title { display: flex; gap: 12px; align-items: center; text-align: left; min-width: 190px; }
+body.portaflow-redesign .invoice-row-title strong { display: block; max-width: 330px; overflow-wrap: anywhere; font-size: 13px; font-weight: 500; }
+body.portaflow-redesign .invoice-row-title small { display: block; font-size: 11px; color: var(--pf-muted); margin-top: 4px; }
+body.portaflow-redesign .invoice-check { width: 42px; }
+body.portaflow-redesign .invoice-inbox [data-slot=table-cell] { padding-top: 17px; padding-bottom: 17px; }
+body.portaflow-redesign .invoice-filter { min-height: 34px; height: 34px; width: auto; min-width: 140px; font-size: 12px; }
+body.portaflow-redesign .invoice-batch-bar { position: sticky; bottom: 18px; display: flex; align-items: center; gap: 12px; padding: 16px 18px; border: 1px solid var(--pf-rule-strong); border-radius: 8px; background: var(--pf-surface); box-shadow: 0 5px 24px rgb(0 0 0 / .08); z-index: 5; }
+body.portaflow-redesign .invoice-batch-bar > div { display: grid; gap: 5px; min-width: 150px; font-size: 12px; }
+body.portaflow-redesign .invoice-batch-bar > input { flex: 1; min-width: 100px; }
+body.portaflow-redesign .invoice-detail-grid { display: grid; grid-template-columns: minmax(0,1.7fr) minmax(280px,1fr); gap: 22px; align-items: start; }
+body.portaflow-redesign .invoice-detail-grid > *, body.portaflow-redesign .invoice-form { min-width: 0; }
+body.portaflow-redesign .invoice-back { justify-self: start; padding-left: 0; margin-bottom: -12px; }
+body.portaflow-redesign .invoice-facts { margin: 0; display: grid; gap: 20px; font-size: 13px; }
+body.portaflow-redesign .invoice-facts dt { font-size: 11px; color: var(--pf-muted); margin-bottom: 6px; }
+body.portaflow-redesign .invoice-facts dd { margin: 0; line-height: 1.7; min-width: 0; }
+body.portaflow-redesign .invoice-facts code, body.portaflow-redesign .invoice-hash, body.portaflow-redesign .invoice-recipient code { display: block; overflow-wrap: anywhere; font-size: 11px; color: var(--pf-muted); line-height: 1.8; margin: 3px 0; }
+body.portaflow-redesign .invoice-facts a { display: inline-flex; align-items: center; gap: 5px; text-decoration: underline; }
+body.portaflow-redesign .invoice-hash { margin: 8px 0 18px; }
+body.portaflow-redesign .invoice-footnote, body.portaflow-redesign .invoice-guarantee { display: flex; gap: 10px; align-items: start; font-size: 12px; color: var(--pf-muted); line-height: 1.8; }
+body.portaflow-redesign .invoice-footnote > svg, body.portaflow-redesign .invoice-guarantee > svg { flex-shrink: 0; margin-top: 3px; }
+body.portaflow-redesign .invoice-form form { display: grid; gap: 18px; }
+body.portaflow-redesign .invoice-form .field-label { margin: 0; gap: 7px; }
+body.portaflow-redesign .invoice-recipient { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--pf-rule); border-radius: 6px; font-size: 12px; min-width: 0; }
+body.portaflow-redesign .invoice-recipient > span { min-width: 0; }
+body.portaflow-redesign .invoice-recipient > svg { flex-shrink: 0; margin-top: 3px; }
+body.portaflow-redesign .invoice-review { font-size: 13px; line-height: 1.7; }
+body.portaflow-redesign .invoice-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 18px 40px; padding: 2px 0; }
+body.portaflow-redesign .invoice-summary > div { display: grid; gap: 7px; }
+body.portaflow-redesign .invoice-summary > div > span:first-child, body.portaflow-redesign .invoice-summary small { font-size: 11px; color: var(--pf-muted); }
+body.portaflow-redesign .invoice-summary .invoice-amount { font-size: 22px; }
+body.portaflow-redesign .invoice-summary > [data-slot=button] { margin-left: auto; }
+body.portaflow-redesign .invoice-setup-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+body.portaflow-redesign .invoice-setup-actions small { color: var(--pf-muted); font-size: 11px; }
+body.portaflow-redesign .invoice-recovery { padding: 18px; border: 1px solid var(--pf-rule); border-radius: 7px; font-size: 12px; color: var(--pf-ink-2); }
+body.portaflow-redesign .invoice-recovery summary { cursor: pointer; font-weight: 500; }
+body.portaflow-redesign .invoice-recovery p { margin: 14px 0; line-height: 1.8; color: var(--pf-muted); }
+body.portaflow-redesign .invoice-recovery form { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+body.portaflow-redesign .invoice-recovery .field-label { margin: 0; }
+body.portaflow-redesign .invoice-recovered { display: grid; gap: 10px; margin: 16px 0; }
+body.portaflow-redesign .invoice-recovered > div { display: flex; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--pf-rule); padding-top: 10px; }
+@media (max-width: 1050px) { body.portaflow-redesign .invoice-detail-grid { grid-template-columns: 1fr; } body.portaflow-redesign .invoice-batch-bar { flex-wrap: wrap; } }
+@media (max-width: 600px) { body.portaflow-redesign .invoice-intro, body.portaflow-redesign .invoice-detail-title { align-items: start; flex-direction: column; gap: 16px; } body.portaflow-redesign .invoice-intro h2, body.portaflow-redesign .invoice-detail-title h2 { font-size: 24px; } body.portaflow-redesign .invoice-tabs { gap: 20px; } body.portaflow-redesign .invoice-inbox [data-slot=card-header] { align-items: start; flex-direction: column; } body.portaflow-redesign .invoice-batch-bar > input { width: 100%; flex-basis: 100%; } body.portaflow-redesign .invoice-batch-bar > button { flex: 1; } }
+@media (max-width: 720px) { body.portaflow-redesign .program-report-heading { flex-direction: column; } body.portaflow-redesign .program-report-actions { justify-content: flex-start; flex-wrap: wrap; } }
 
 /* daisyUI fieldsets keep multi-payment forms visually separated and legible. */
 body.portaflow-redesign .op-payment-editor { gap: 16px; }

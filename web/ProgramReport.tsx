@@ -1,0 +1,36 @@
+import { useEffect, useState } from 'react';
+import { ArrowUpRight, CheckCheck, Copy, Download, FileText, LoaderCircle, ShieldCheck } from 'lucide-react';
+import type { ProgramReport } from '../shared/types';
+import { shortAddress } from '../shared/money';
+import { request } from './api';
+import { Amount } from './RoundList';
+import { Badge } from './components/ui/badge';
+import { Button } from './components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './components/ui/table';
+
+export function ProgramReportPage({ treasuryId, block }: { treasuryId?: string; block: number }) {
+  const [report, setReport] = useState<ProgramReport | null>(null), [error, setError] = useState(''), [copied, setCopied] = useState(false);
+  useEffect(() => {
+    let live = true; setError(''); setCopied(false);
+    if (treasuryId) void request<ProgramReport>('/programs/' + encodeURIComponent(treasuryId) + '/report')
+      .then(value => { if (live) setReport(value); }).catch(error => { if (live) setError(error.message); });
+    return () => { live = false; };
+  }, [treasuryId, block]);
+  if (!treasuryId) return <Card className="op-card"><CardContent><p>Create or select a treasury to view its program report.</p></CardContent></Card>;
+  if (error) return <div className="op-notice" role="alert">{error}</div>;
+  if (!report || report.treasury.id !== treasuryId) return <div className="page-loading" role="status"><LoaderCircle className="spin" size={18} />Preparing program report…</div>;
+  const share = async () => {
+    try { await navigator.clipboard.writeText(location.origin + location.pathname + '#/programs/' + treasuryId); setCopied(true); }
+    catch { setError('Copy this report URL: ' + location.origin + location.pathname + '#/programs/' + treasuryId); }
+  };
+  return <div className="op-stack program-report">
+    <Card className="op-card"><CardHeader className="program-report-heading"><div><Badge variant="outline">Public · read only · testnet</Badge><CardTitle>{report.treasury.name}</CardTitle><CardDescription>Funding accountability for contributors, program operators, and ecosystem reviewers.</CardDescription><code className="program-address">{report.treasury.address}</code></div><div className="heading-actions program-report-actions"><Button variant="outline" onClick={() => void share()}><Copy />{copied ? 'Link copied' : 'Share report'}</Button><Button variant="outline" asChild><a href={'/api/programs/' + treasuryId + '/report?format=csv'} download><Download />Export CSV</a></Button></div></CardHeader></Card>
+    {copied && <p className="fine-print" role="status">Anyone with this link can read the report without connecting a wallet.</p>}
+    <div className="op-metrics"><div><span>Recorded funding</span><strong><Amount raw={report.totals.fundedRaw} /></strong><small>{report.totals.paymentCount} payments · {report.totals.fundingTransactions} funding transactions</small></div><div><span>Contributor wallets</span><strong>{report.totals.recipientCount}</strong><small>Distinct funded native accounts</small></div><div><span>Scheduled remainder</span><strong><Amount raw={report.totals.remainingScheduledRaw} /></strong><small>Release calculation at #{report.finalizedBlock.toLocaleString()}</small></div></div>
+    <Card className="op-card"><CardHeader><CardTitle>Where the funding went</CardTitle><CardDescription>Recorded funded payments only. Draft and pending proposals are excluded from these totals.</CardDescription></CardHeader>{report.payments.length ? <Table><TableHeader><TableRow><TableHead>Contribution / recipient</TableHead><TableHead>Total</TableHead><TableHead>Immediate / vested</TableHead><TableHead>Funding evidence</TableHead><TableHead>Receipt</TableHead></TableRow></TableHeader><TableBody>{report.payments.map(p => <TableRow key={(p.roundId || 'award') + ':' + p.id}><TableCell><div className="op-payment-name"><strong>{p.title}</strong><code title={p.recipient}>{shortAddress(p.recipient)}</code>{p.roundTitle && <small>{p.roundTitle}</small>}{p.workUrl && <a href={p.workUrl} target="_blank" rel="noreferrer">Work reference <ArrowUpRight size={11} /></a>}</div></TableCell><TableCell><Amount raw={p.totalRaw} /></TableCell><TableCell><div className="program-split"><Amount raw={p.upfrontRaw} /><small>immediate</small><Amount raw={p.lockedRaw} /><small>vested allocation</small></div></TableCell><TableCell><div className="op-payment-name"><strong>#{p.fundingBlock.toLocaleString()}</strong><code title={p.fundingTx}>{shortAddress(p.fundingTx)}</code><a href={'#/' + (p.roundId ? 'rounds/' + p.roundId : 'awards/' + p.id)}>View payment <ArrowUpRight size={11} /></a></div></TableCell><TableCell><Button variant="ghost" size="icon-sm" asChild><a href={p.receiptPath} download aria-label={'Download receipt for ' + p.title}><Download /></a></Button></TableCell></TableRow>)}</TableBody></Table> : <CardContent><p className="fine-print">No funded payments have been recorded for this program yet.</p></CardContent>}</Card>
+    <div className="op-two-col"><Card className="op-card"><CardHeader><CardTitle><ShieldCheck size={17} /> What protects the treasury</CardTitle></CardHeader><CardContent className="program-notes"><p><strong>{report.treasury.threshold} of {report.treasury.signatories.length} signatures</strong> authorize a payment. Keys remain with the signers.</p><p>Portaldot executes each payout batch atomically. Native vesting enforces the release schedule.</p><p>Each receipt can be independently checked against finalized chain data in <a href="#/verify">Verify receipt</a>.</p></CardContent></Card><Card className="op-card"><CardHeader><CardTitle><CheckCheck size={17} /> Reporting boundaries</CardTitle></CardHeader><CardContent className="program-notes"><p>{report.totals.pendingProposals} pending proposals · {report.totals.draftProposals} drafts. These remain separate from funded totals.</p><p>History indexed through <strong>#{report.indexedBlock.toLocaleString()}</strong> · finalized head <strong>#{report.finalizedBlock.toLocaleString()}</strong>. {report.historySynced ? 'History is caught up to this snapshot.' : 'History is catching up; newly finalized payouts may not be included yet.'}</p><p>Schedule progress is not proof of completed work or a vesting unlock. This report summarizes application records; use the receipts to verify funding.</p></CardContent></Card></div>
+    <Card className="op-card"><CardHeader><CardTitle><FileText size={17} /> Integrate this report</CardTitle><CardDescription>Read the same program data in a grant portal or community dashboard. No wallet login is needed.</CardDescription></CardHeader><CardContent><code className="program-endpoint">GET /api/programs/{treasuryId}/report</code><div className="program-builder-links"><a href={'/api/programs/' + treasuryId + '/report'} target="_blank" rel="noreferrer">Open JSON report <ArrowUpRight size={14} /></a></div></CardContent></Card>
+    <p className="fine-print">Generated {new Date(report.generatedAt).toLocaleString()} · tPOT testnet amounts · report version {report.version}. No wallet connection or signature is required to read this report.</p>
+  </div>;
+}

@@ -8,6 +8,7 @@ function queuedReceipts(): FinalizedTransaction[] {
     return Array.isArray(value) ? value.filter(tx => /^0x[0-9a-f]{64}$/i.test(tx?.txHash) && /^0x[0-9a-f]{64}$/i.test(tx?.blockHash)).slice(-25) : [];
   } catch { return []; }
 }
+export const finalizedReceipt = (txHash: string) => queuedReceipts().find(tx=>tx.txHash===txHash);
 export function rememberReceipt(tx: FinalizedTransaction) {
   try { localStorage.setItem(RECEIPT_QUEUE, JSON.stringify([...queuedReceipts().filter(row => row.txHash !== tx.txHash), tx].slice(-25))); } catch { /* Browser storage may be disabled. */ }
 }

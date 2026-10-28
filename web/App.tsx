@@ -1,47 +1,55 @@
 import { createContext, useContext, useCallback, useEffect, useRef, useState, lazy, Suspense, type FormEvent, type ReactNode } from 'react';
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Copy, Download, ExternalLink, FileText, Grid2X2, Layers3, LoaderCircle, Menu, Plus, Search, ShieldCheck, Users, Wallet, X, Clock3, RefreshCw, Link2, AlertCircle, CheckCircle2, LogOut, Upload } from 'lucide-react';
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Copy, Download, ExternalLink, FileText, Grid2X2, Inbox, Layers3, LoaderCircle, Menu, Plus, Search, ShieldCheck, Users, Wallet, X, Clock3, RefreshCw, Link2, AlertCircle, CheckCircle2, LogOut, Upload } from 'lucide-react';
 import { NETWORK, type Award, type AwardDetail, type NetworkState, type Overview, type PayoutRound, type TransactionPlan, type Treasury, type WalletState } from '../shared/types';
 import { formatAmount, parseAmount, shortAddress, UNIT, vestedRemaining } from '../shared/money';
 import type { NativeAccount, NativeProvider } from './wallet';
 import { request } from './api';
-import { syncFinalizedReceipts } from './receipts';
+import { syncFinalizedReceipts, finalizedReceipt } from './receipts';
 import { readAwardCsv, IMPORT_COLUMNS, type ImportRow } from '../shared/import';
 import { RoundList } from './RoundList';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './components/ui/dialog';
 import { Button } from './components/ui/button';
 import { ThemeToggle } from './ThemeToggle';
+import type { InvoiceBatch } from '../shared/invoices';
+import {rpcReadFailureMessage} from '../shared/rpc-errors';
 
 const RoundForm = lazy(() => import('./Operations').then(module => ({ default: module.RoundForm })));
 const RoundPage = lazy(() => import('./Operations').then(module => ({ default: module.RoundPage })));
 const LedgerPage = lazy(() => import('./Operations').then(module => ({ default: module.LedgerPage })));
 const RecipientPage = lazy(() => import('./Operations').then(module => ({ default: module.RecipientPage })));
 const VerifyPage = lazy(() => import('./Operations').then(module => ({ default: module.VerifyPage })));
+const ProgramReportPage = lazy(() => import('./ProgramReport').then(module => ({ default: module.ProgramReportPage })));
+const InvoicesPage = lazy(() => import('./Invoices').then(module => ({ default: module.InvoicesPage })));
+const InvoiceApprovals = lazy(() => import('./Invoices').then(module => ({ default: module.InvoiceApprovals })));
+const InvoiceBatchReview = lazy(() => import('./Invoices').then(module => ({ default: module.InvoiceBatchReview })));
 function LoadingPage() { return <div className="page-loading" role="status"><LoaderCircle size={18} className="spin" /><span>Loading workspace…</span></div>; }
 
-type Page = 'overview' | 'awards' | 'approvals' | 'recipients' | 'treasury' | 'award' | 'rounds' | 'round' | 'ledger' | 'my-funds' | 'verify';
+type Page = 'overview' | 'awards' | 'approvals' | 'recipients' | 'treasury' | 'award' | 'rounds' | 'round' | 'ledger' | 'my-funds' | 'verify' | 'program' | 'invoices' | 'invoice' | 'invoice-batch';
 type ModalKind = 'wallet' | 'treasury' | 'award' | 'round' | 'fund' | 'review' | 'guide' | 'import' | null;
-type Review = { plan: TransactionPlan; award?: Award; round?: PayoutRound; treasury?: Treasury; recipient?: string; amountRaw?: string };
+type Review = { plan: TransactionPlan; award?: Award; round?: PayoutRound; treasury?: Treasury; recipient?: string; amountRaw?: string; invoiceBatch?: InvoiceBatch; mappingAddresses?: string[]; settlementDeployment?: boolean };
 const emptyNetwork: NetworkState = { connected: false, verified: false, name: NETWORK.name, genesis: NETWORK.genesis, finalizedBlock: 0, bestBlock: 0, specVersion: 0, blockSeconds: 6, existentialDepositRaw: '0', minVestedRaw: '0', maxSchedules: 0, depositBaseRaw: '0', depositFactorRaw: '0', lastSyncedBlock: 0, sponsorEnabled: false };
 const nav: { key: Page; label: string; icon: typeof Wallet }[] = [
   { key: 'overview', label: 'Overview', icon: Grid2X2 },
+  { key: 'invoices', label: 'Invoices', icon: Inbox },
   { key: 'rounds', label: 'Payout rounds', icon: Layers3 },
   { key: 'awards', label: 'Awards', icon: Layers3 },
   { key: 'approvals', label: 'Approvals', icon: CheckCheck },
   { key: 'recipients', label: 'Recipients', icon: Users },
   { key: 'treasury', label: 'Treasury', icon: Wallet },
   { key: 'ledger', label: 'Treasury ledger', icon: FileText },
+  { key: 'program', label: 'Program report', icon: FileText },
   { key: 'my-funds', label: 'My funds', icon: ArrowDownLeft },
   { key: 'verify', label: 'Verify receipt', icon: ShieldCheck },
 ];
 const navGroups: { label: string; keys: Page[] }[] = [
-  { label: 'Payments', keys: ['overview', 'rounds', 'awards', 'approvals'] },
-  { label: 'Treasury', keys: ['recipients', 'ledger', 'treasury'] },
+  { label: 'Payments', keys: ['overview', 'invoices', 'rounds', 'awards', 'approvals'] },
+  { label: 'Treasury', keys: ['recipients', 'ledger', 'treasury', 'program'] },
   { label: 'Personal', keys: ['my-funds', 'verify'] },
 ];
 const ErrorContext = createContext('');
 function route() {
-  const [section = 'overview', id] = location.hash.slice(2).split('/');
-  return { page: (id && section === 'rounds' ? 'round' : id && section === 'awards' ? 'award' : nav.some(n => n.key === section) ? section : 'overview') as Page, id: id ?? '' };
+  const [section = 'overview', id] = location.hash.slice(2).split('?')[0].split('/');
+  return { page: (id && section === 'invoices' ? 'invoice' : id && section === 'invoice-batches' ? 'invoice-batch' : id && section === 'programs' ? 'program' : id && section === 'rounds' ? 'round' : id && section === 'awards' ? 'award' : nav.some(n => n.key === section) ? section : 'overview') as Page, id: id ?? '' };
 }
 function Money({ raw = '0', big = false }: { raw?: string; big?: boolean }) {
   return <span className={big ? 'money money-big' : 'money'} title={formatAmount(raw, 14) + ' tPOT'}>{formatAmount(raw, BigInt(raw) > 0n && BigInt(raw) < UNIT / 10_000n ? 14 : 4)} <span className="unit">tPOT</span></span>;
@@ -107,13 +115,15 @@ export default function App() {
   const [filter, setFilter] = useState('all');
   const [review, setReview] = useState<Review | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const treasury = data.treasuries.find(t => t.id === treasuryId) ?? data.treasuries[0];
+  const requestedTreasury=page==='invoices'?new URLSearchParams(location.hash.split('?')[1]||'').get('treasury'):null;
+  const treasury = page === 'program' && awardId ? data.treasuries.find(t => t.id === awardId) : requestedTreasury?data.treasuries.find(t=>t.id===requestedTreasury):data.treasuries.find(t => t.id === treasuryId) ?? data.treasuries[0];
   const address = data.session?.address;
   const awards = data.awards.filter(a => a.treasuryId === treasury?.id);
   const rounds = (data.rounds || []).filter(r => r.treasuryId === treasury?.id);
+  const invoiceBatches=(data.invoiceBatches||[]).filter(b=>b.treasuryId===treasury?.id);
   const roundPayments = rounds.filter(r => r.status === 'funded').flatMap(r => r.awards);
   const pending = awards.filter(a => a.status === 'draft' || a.status === 'awaiting_approval');
-  const pendingCount = pending.length + rounds.filter(r => ['draft', 'awaiting_approval'].includes(r.status)).length;
+  const pendingCount = pending.length + rounds.filter(r => ['draft', 'awaiting_approval'].includes(r.status)).length + invoiceBatches.filter(b=>['draft','awaiting_approval'].includes(b.status)).length;
   const funded = [...awards.filter(a => a.status === 'funded'), ...roundPayments];
   const recipients = [...new Set(funded.map(a => a.recipient))];
   const committed = funded.reduce((sum, a) => sum + BigInt(a.totalRaw), 0n);
@@ -129,6 +139,7 @@ export default function App() {
         setData(previous => ({ ...next,
           awards: JSON.stringify(previous.awards) === JSON.stringify(next.awards) ? previous.awards : next.awards,
           rounds: JSON.stringify(previous.rounds) === JSON.stringify(next.rounds) ? previous.rounds : next.rounds,
+          invoiceBatches: JSON.stringify(previous.invoiceBatches) === JSON.stringify(next.invoiceBatches) ? previous.invoiceBatches : next.invoiceBatches,
           treasuries: JSON.stringify(previous.treasuries) === JSON.stringify(next.treasuries) ? previous.treasuries : next.treasuries,
         }));
         setLoaded(true);
@@ -156,6 +167,11 @@ export default function App() {
     addEventListener('hashchange', handler); return () => removeEventListener('hashchange', handler);
   }, []);
   useEffect(() => {
+    if (page === 'program' && awardId && data.treasuries.some(t => t.id === awardId)) {
+      setTreasuryId(awardId); localStorage.setItem('portaflow-treasury', awardId);
+    }
+  }, [page, awardId, data.treasuries]);
+  useEffect(() => {
     let current = true;
     if (treasury && data.network.connected) {
       void request<WalletState>('/wallet/' + treasury.address).then(value => { if (current) setWallet(value); }).catch(() => { if (current) setWallet(null); });
@@ -181,11 +197,11 @@ export default function App() {
     };
     addEventListener('keydown', focusSearch); return () => removeEventListener('keydown', focusSearch);
   }, [modal]);
-  const go = (next: Page, id?: string) => { location.hash = id ? (next === 'round' ? '/rounds/' : '/awards/') + id : '/' + next; };
+  const go = (next: Page, id?: string) => { location.hash = id ? (next === 'invoice' ? '/invoices/' : next === 'invoice-batch' ? '/invoice-batches/' : next === 'program' ? '/programs/' : next === 'round' ? '/rounds/' : '/awards/') + id : '/' + next; };
   const copy = async (value: string) => { try { await navigator.clipboard.writeText(value); setToast('Copied to clipboard'); } catch { setError('Clipboard access is unavailable. Select and copy the address manually.'); } };
   const act = async (fn: () => Promise<void>) => {
     if (busy) return; setBusy(true); setError('');
-    try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : 'The action could not be completed.'); }
+    try { await fn(); } catch (e) { setError(rpcReadFailureMessage(e) || (e instanceof Error ? e.message : 'The action could not be completed.')); }
     finally { setBusy(false); setProgress(''); }
   };
   const openWallet = () => {
@@ -207,7 +223,16 @@ export default function App() {
     if (!review) return;
     try {
       const { signTransaction } = await import('./wallet');
-      await signTransaction(review.plan, review, setProgress);
+      const txHash = await signTransaction(review.plan, review, setProgress);
+      if(review.settlementDeployment&&review.treasury){
+        // Chain deployment has already succeeded. Never leave a button that can sign it again.
+        setModal(null);setReview(null);
+        const proof=finalizedReceipt(txHash);
+        if(!proof)throw new Error('Deployment finalized. Its receipt is not available yet; register it before deploying again.');
+        const registration={...proof,treasuryId:review.treasury.id};localStorage.setItem('portaflow-settlement-registration',JSON.stringify(registration));
+        setToast('Contract deployed. Verifying its registration…');
+        await request('/settlement/register',registration);localStorage.removeItem('portaflow-settlement-registration');
+      }
       setModal(null); setToast('Transaction finalized on Portaldot');
     } finally {
       try { await syncFinalizedReceipts(); } catch { /* The verified receipt is retained for the next refresh. */ }
@@ -225,7 +250,7 @@ export default function App() {
     return <div className="table-scroll"><table className="table award-table"><thead><tr><th>Award / recipient</th><th>Amount</th><th>Status</th><th>Release schedule</th><th aria-label="View award" /></tr></thead><tbody>
       {rows.map(award => <tr key={award.id}><td><button className="row-title" onClick={() => go('award', award.id)}><span className="row-file"><FileText size={17} /></span><span><strong>{award.title}</strong><small>{shortAddress(award.recipient)}</small></span></button></td><td><Money raw={award.totalRaw} /></td><td><Status award={award} block={network.finalizedBlock} /></td><td><span className="schedule-label">{award.lockedRaw === '0' ? 'Immediate payment' : Math.round(award.durationBlocks * network.blockSeconds / 86400) >= 1 ? Math.round(award.durationBlocks * network.blockSeconds / 86400) + ' days estimated' : award.durationBlocks + ' blocks'}</span>{award.lockedRaw !== '0' && <small className="muted">From #{award.startBlock.toLocaleString()}</small>}</td><td><button className="icon-button" aria-label={'Open ' + award.title} onClick={() => go('award', award.id)}><ChevronRight size={16} /></button></td></tr>)}
     </tbody></table>{!rows.length && <Empty title={search || filter !== 'all' ? 'No matching awards' : page === 'approvals' ? pendingCount ? 'No individual awards awaiting approval' : 'Your approval queue is clear' : 'No awards yet'}
-      text={search || filter !== 'all' ? 'Try another search or status.' : page === 'approvals' && pendingCount ? 'Payout rounds awaiting approval are listed below.' : 'Fund a contribution, agree on its release schedule, and give the recipient a clear path to their funds.'}
+      text={search || filter !== 'all' ? 'Try another search or status.' : page === 'approvals' && pendingCount ? 'Other payment proposals awaiting approval are listed below.' : 'Fund a contribution, agree on its release schedule, and give the recipient a clear path to their funds.'}
       action={!search && filter === 'all' && <button className="btn btn-outline btn-sm" onClick={() => needWallet(treasury ? 'award' : 'treasury')}><Plus size={14} />{treasury ? 'Create an award' : 'Set up a treasury'}</button>} />}</div>;
   }
 
@@ -233,12 +258,12 @@ export default function App() {
     <aside className="sidebar">
       <a className="brand" href="#/overview" aria-label="PortaFlow overview"><svg viewBox="0 0 28 28" aria-hidden="true"><path d="M4 6h14l6 6H10zM4 15h14l6 6H10z" fill="currentColor" /></svg><span>portaflow<span className="brand-period">.</span></span></a>
       <label className="workspace-select">{treasury ? <span className="workspace-avatar">{treasury.name.slice(0, 1).toUpperCase()}</span> : <span className="workspace-avatar"><Layers3 size={15} /></span>}
-        <select aria-label="Treasury workspace" value={treasury?.id || ''} onChange={e => { setTreasuryId(e.target.value); localStorage.setItem('portaflow-treasury', e.target.value); }}>
+        <select aria-label="Treasury workspace" value={treasury?.id || ''} onChange={e => { setTreasuryId(e.target.value); localStorage.setItem('portaflow-treasury', e.target.value); if (page === 'program') go('program', e.target.value); }}>
           {!data.treasuries.length && <option value="">Your workspace</option>}{data.treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select><ChevronDown size={13} />
       </label>
       <div className="navigation-groups">{navGroups.map(group => <div className="nav-group" key={group.label}><div className="nav-section-label">{group.label}</div><nav className="menu" aria-label={group.label}>{group.keys.map(key => nav.find(item => item.key === key)!).map(item => {
-        const active = page === item.key || page === 'award' && item.key === 'awards' || page === 'round' && item.key === 'rounds';
+        const active = page === item.key || ['invoice','invoice-batch'].includes(page) && item.key === 'invoices' || page === 'award' && item.key === 'awards' || page === 'round' && item.key === 'rounds';
         return <a key={item.key} href={'#/' + item.key} className={active ? 'nav-active' : ''} aria-current={active ? 'page' : undefined}><item.icon size={17} strokeWidth={1.6} /><span>{item.label}</span>{item.key === 'approvals' && pendingCount > 0 && <span className="nav-count">{pendingCount}</span>}</a>;
       })}</nav></div>)}</div>
       <div className="sidebar-bottom">
@@ -251,16 +276,17 @@ export default function App() {
     </aside>
     {mobileOpen && <button className="navigation-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <div className="workspace">
-      <header className="topbar"><div className="breadcrumbs"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu size={19} /></button><span className="breadcrumb-workspace">{treasury?.name || 'Workspace'}</span><ChevronRight size={12} /><strong>{page === 'award' ? 'Award details' : page === 'round' ? 'Payout round' : nav.find(n => n.key === page)?.label}</strong></div>
+      <header className="topbar"><div className="breadcrumbs"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu size={19} /></button><span className="breadcrumb-workspace">{treasury?.name || 'Workspace'}</span><ChevronRight size={12} /><strong>{page === 'invoice' ? 'Invoice' : page === 'invoice-batch' ? 'Invoice batch' : page === 'award' ? 'Award details' : page === 'round' ? 'Payout round' : nav.find(n => n.key === page)?.label}</strong></div>
         <div className="topbar-actions"><ThemeToggle /><button className="icon-button refresh-button" aria-label="Refresh balances" title={refreshPending ? 'Updating balances…' : 'Refresh balances'} disabled={refreshPending} onClick={() => void refresh()}><RefreshCw size={15} className={refreshPending ? 'spin' : undefined} /></button><span className="testnet-label">Testnet</span><button className="wallet-button" onClick={openWallet}><Wallet size={15} />{address ? shortAddress(address) : 'Connect wallet'}<ChevronDown size={12} /></button></div></header>
       <main data-page={page}><Suspense fallback={<LoadingPage />}>
         {!networkReady && loaded && <div className="network-notice"><LoaderCircle size={15} className="spin" /><span>{network.error || 'Connecting to Portaldot V3. Chain actions become available after network verification.'}</span></div>}
-        {page !== 'award' && page !== 'round' && <div className="page-heading"><div><div className="eyebrow">{page === 'overview' ? 'YOUR FUNDING WORKSPACE' : 'WORKSPACE / ' + page.replace('-', ' ').toUpperCase()}</div><h1>{page === 'overview' ? 'Overview' : nav.find(n => n.key === page)?.label}</h1><p>{page === 'overview' ? 'Shared payments and contributor funding.' : page === 'rounds' ? 'Pay a whole contributor round with one approval flow.' : page === 'ledger' ? 'Follow the funds, from treasury deposit to recipient.' : page === 'my-funds' ? 'Your funding, vesting progress, and unlocks across workspaces.' : page === 'verify' ? 'Check the payment against finalized Portaldot evidence.' : page === 'approvals' ? 'Review the exact terms before your treasury commits funds.' : page === 'treasury' ? 'A shared treasury, controlled by its signers.' : page === 'recipients' ? 'The people and teams your treasury has funded.' : 'Create and manage individual contributor payments.'}</p></div><div className="heading-actions">{page === 'treasury' && treasury && <button className="btn btn-outline" onClick={() => needWallet('treasury')}><Plus size={15} />New treasury</button>}{!['my-funds', 'verify', 'ledger'].includes(page) && createButton}</div></div>}
+        {!['award','round','invoice','invoice-batch','invoices'].includes(page) && <div className="page-heading"><div><div className="eyebrow">{page === 'overview' ? 'YOUR FUNDING WORKSPACE' : 'WORKSPACE / ' + page.replace('-', ' ').toUpperCase()}</div><h1>{page === 'overview' ? 'Overview' : nav.find(n => n.key === page)?.label}</h1><p>{page === 'overview' ? 'Shared payments and contributor funding.' : page === 'program' ? 'Share funding results and export a traceable program report.' : page === 'rounds' ? 'Pay a whole contributor round with one approval flow.' : page === 'ledger' ? 'Follow the funds, from treasury deposit to recipient.' : page === 'my-funds' ? 'Your funding, vesting progress, and unlocks across workspaces.' : page === 'verify' ? 'Check the payment against finalized Portaldot evidence.' : page === 'approvals' ? 'Review the exact terms before your treasury commits funds.' : page === 'treasury' ? 'A shared treasury, controlled by its signers.' : page === 'recipients' ? 'The people and teams your treasury has funded.' : 'Create and manage individual contributor payments.'}</p></div><div className="heading-actions">{page === 'treasury' && treasury && <button className="btn btn-outline" onClick={() => needWallet('treasury')}><Plus size={15} />New treasury</button>}{!['my-funds', 'verify', 'ledger', 'program'].includes(page) && createButton}</div></div>}
+        {['invoices','invoice','invoice-batch'].includes(page) && <InvoicesPage treasury={treasury} treasuries={data.treasuries} address={address} block={network.finalizedBlock} view={page as 'invoices'|'invoice'|'invoice-batch'} id={awardId} busy={busy} onWallet={openWallet} open={go} onReview={value=>{setReview(value);setModal('review');}} />}
 
         {page === 'overview' && <>
           <div className="stats-strip">
             <div className="stat-item"><span>Available to award <Wallet size={14} /></span><strong>{wallet ? <Money raw={wallet.spendableRaw} /> : <span className="unknown-amount">— <span>tPOT</span></span>}</strong><small>{treasury ? 'After minimum account balance' : 'Set up your shared treasury'}</small></div>
-            <div className="stat-item"><span>Total funded <ArrowUpRight size={14} /></span><strong><Money raw={committed.toString()} /></strong><small>{funded.length} funded award{funded.length !== 1 ? 's' : ''}</small></div>
+            <div className="stat-item"><span>Awards funded <ArrowUpRight size={14} /></span><strong><Money raw={committed.toString()} /></strong><small>{funded.length} funded award{funded.length !== 1 ? 's' : ''}</small></div>
             <div className="stat-item"><span>Awaiting approval <Clock3 size={14} /></span><strong>{pendingCount}<span className="stat-word"> proposals</span></strong><small>Rounds and individual awards</small></div>
             <div className="stat-item"><span>Recipients <Users size={14} /></span><strong>{recipients.length}<span className="stat-word"> wallets</span></strong><small>Funded directly on Portaldot</small></div>
           </div>
@@ -318,10 +344,12 @@ export default function App() {
           </aside></div>
         </> : <div className="loading-detail"><LoaderCircle className="spin" size={22} /><p>Loading award from PortaFlow…</p></div>)}
         {(page === 'rounds' || page === 'approvals') && <RoundList rounds={page === 'approvals' ? rounds.filter(r => ['draft', 'awaiting_approval'].includes(r.status)) : rounds} open={id => go('round', id)} />}
+        {page === 'approvals' && <InvoiceApprovals batches={invoiceBatches} open={id=>go('invoice-batch',id)} />}
         {page === 'round' && <RoundPage id={awardId} block={network.finalizedBlock} network={network} address={address} busy={busy} back={() => go('rounds')} onWallet={openWallet} refresh={refresh} onReview={value => { setReview(value); setModal('review'); }} />}
         {page === 'ledger' && <LedgerPage key={treasury?.id} treasury={treasury} block={network.finalizedBlock} />}
         {page === 'my-funds' && <RecipientPage address={address} block={network.finalizedBlock} networkReady={networkReady} onWallet={openWallet} open={(id, round) => go(round ? 'round' : 'award', id)} onReview={value => { setReview(value); setModal('review'); }} />}
         {page === 'verify' && <VerifyPage />}
+        {page === 'program' && <ProgramReportPage treasuryId={awardId || treasury?.id} block={network.finalizedBlock} />}
         <footer className="workspace-footer"><span><span className={'connection-dot ' + (networkReady ? 'online' : '')} />{networkReady ? 'Connected to Portaldot V3' : 'Waiting for network'}</span><span>{network.finalizedBlock > 0 ? 'Finalized #' + network.finalizedBlock.toLocaleString() : 'Checking finalized head'}<span className="footer-divider">/</span>Funds stay on-chain</span></footer>
       </Suspense></main>
     </div>
@@ -349,7 +377,10 @@ export default function App() {
     {modal === 'round' && treasury && <Modal title="Create a payout round" eyebrow={treasury.name.toUpperCase()} wide close={() => setModal(null)} busy={busy}><RoundForm treasury={treasury} network={network} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const created = await request<PayoutRound>('/rounds', values); setModal(null); await refresh(true); go('round', created.id); setToast('Payout round ready for shared approval'); })} /></Modal>}
     {modal === 'import' && treasury && <ImportForm treasury={treasury} busy={busy} close={() => setModal(null)} submit={values => void act(async () => { const result = await request<{ awards: Award[] }>('/awards/import', values); setModal(null); await refresh(true); go('awards'); setToast(result.awards.length + ' award drafts imported'); })} />}
     {modal === 'fund' && treasury && <FundingForm treasury={treasury} busy={busy} close={() => setModal(null)} submit={amount => void act(async () => { const plan = await request<TransactionPlan>('/treasuries/' + treasury.id + '/funding-plan', { amount }); setReview({ plan, treasury, amountRaw: parseAmount(amount).toString() }); setModal('review'); })} />}
-    {modal === 'review' && review && <Modal title="Review transaction" eyebrow={review.plan.kind.toUpperCase()} busy={busy} wide={Boolean(review.round)} close={() => setModal(null)}><div className="review-target"><ShieldCheck size={23} /><div><strong>{review.round?.title || review.award?.title || (review.plan.kind === 'treasury funding' ? 'Fund ' + review.treasury?.name : 'Unlock vested funds')}</strong><small>{review.plan.kind === 'approval' ? 'Records your approval. A later signer completes funding.' : review.plan.kind === 'funding' ? 'This signature executes the approved payments atomically.' : 'Signed in your native wallet.'}</small></div></div>
+    {modal === 'review' && review && <Modal title="Review transaction" eyebrow={review.plan.kind.toUpperCase()} busy={busy} wide={Boolean(review.round || review.invoiceBatch)} close={() => setModal(null)}><div className="review-target"><ShieldCheck size={23} /><div><strong>{review.invoiceBatch?.title || review.round?.title || review.award?.title || (review.plan.kind === 'settlement deployment' ? 'Set up invoice settlement' : review.plan.kind === 'invoice mapping' ? 'Enable contract payments for these accounts' : review.plan.kind === 'treasury funding' ? 'Fund ' + review.treasury?.name : 'Unlock vested funds')}</strong><small>{review.plan.kind === 'approval' ? 'Records your approval. A later signer completes funding.' : review.plan.kind === 'funding' ? 'This signature executes the approved payments atomically.' : 'Signed in your native wallet.'}</small></div></div>
+      {review.mappingAddresses && <div className="invoice-review"><p>Registers these native accounts for contract payments. This action does not pay any invoices.</p>{review.mappingAddresses.map(a=><code className="invoice-hash" key={a}>{a}</code>)}</div>}
+      {review.settlementDeployment && <div className="invoice-review"><p>Deploys the reviewed PortaFlow invoice settlement contract to Portaldot testnet. This account pays a storage deposit of up to {formatAmount(review.plan.storageDepositRaw||'0')} tPOT, separately from the network fee. No treasury or contributor funds are deposited into the contract.</p></div>}
+      {review.invoiceBatch && <InvoiceBatchReview batch={review.invoiceBatch} />}
       {review.round && <><div className="op-round-totals"><div><span>Total · {review.round.awards.length} payments</span><Money raw={review.round.totalRaw} /></div><div><span>Immediate</span><Money raw={review.round.upfrontRaw} /></div><div><span>Vested</span><Money raw={review.round.lockedRaw} /></div></div><div className="op-review-payments">{review.round.awards.map(a => <div key={a.id}><span><strong>{a.title}</strong><code>{a.recipient}</code><small>{a.lockedRaw === '0' ? '100% immediate' : formatAmount(a.upfrontRaw) + ' immediate · ' + formatAmount(a.lockedRaw) + ' vested · #' + a.startBlock + ' → #' + a.endBlock}</small></span><Money raw={a.totalRaw} /></div>)}</div><p className="fine-print">Terms hash</p><code className="op-hash">{review.round.termsHash}</code></>}
       <dl className="review-details">{review.award && review.plan.kind !== 'unlock' && <><div><dt>Total award</dt><dd><Money raw={review.award.totalRaw} /></dd></div><div><dt>Immediate / vested</dt><dd>{formatAmount(review.award.upfrontRaw)} / {formatAmount(review.award.lockedRaw)} tPOT</dd></div><div><dt>Start / end block</dt><dd>#{review.award.startBlock} / #{review.award.endBlock}</dd></div></>}{review.recipient && <div><dt>Recipient</dt><dd title={review.recipient}>{shortAddress(review.recipient)}</dd></div>}{review.plan.kind === 'unlock' && <div><dt>Action</dt><dd>Update recipient’s vesting lock</dd></div>}{review.amountRaw && <div><dt>Transfer amount</dt><dd><Money raw={review.amountRaw} /></dd></div>}<div><dt>Signing wallet / fee payer</dt><dd>{shortAddress(review.plan.signer)}</dd></div><div><dt>Estimated network fee</dt><dd><Money raw={review.plan.feeRaw} /></dd></div>{BigInt(review.plan.depositRaw) > 0n && <div><dt>Refundable approval deposit</dt><dd><Money raw={review.plan.depositRaw} /></dd></div>}<div><dt>Network</dt><dd>Portaldot V3 Testnet</dd></div></dl>
       <p className="fine-print">The browser verifies the encoded transaction against these terms before opening your wallet. Your wallet may first ask to add Portaldot’s network details. Network fees are estimates; the wallet shows the final signing request.</p><div className="modal-footer"><button className="btn btn-outline" disabled={busy} onClick={() => setModal(null)}>Back</button><button className="btn btn-primary" disabled={busy} onClick={submitReview}>{busy ? <LoaderCircle size={15} className="spin" /> : <Wallet size={15} />}{busy ? progress || 'Preparing wallet…' : 'Confirm in wallet'}</button></div>
