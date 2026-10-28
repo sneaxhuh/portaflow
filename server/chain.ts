@@ -1,4 +1,4 @@
-import { ApiPromise, WsProvider } from '@polkadot/api';
+import { ApiPromise, WsProvider, HttpProvider } from '@polkadot/api';
 import { randomUUID } from 'node:crypto';
 import { Keyring } from '@polkadot/keyring';
 import type { KeyringPair } from '@polkadot/keyring/types';
@@ -7,6 +7,8 @@ import { vestedRemaining, UNIT, schedule } from '../shared/money.js';
 import { normalizeAddress, sameAddress } from './identity.js';
 import type { DataStore } from './store.js';
 import { awardTermsHash, fundingCall, transactionFromCall, roundFundingCall, roundTermsHash } from '../shared/calls.js';
+import type { InvoiceBatch } from '../shared/invoices.js';
+import { hasInvoiceSettlement } from '../shared/invoice-events.js';
 
 export const initialNetwork = (): NetworkState => ({
   connected: false, verified: false, name: NETWORK.name, genesis: NETWORK.genesis,
@@ -40,6 +42,7 @@ export class Chain {
   private busy = false;
   private scanning?: Promise<void>;
   private connecting?: Promise<void>;
+  private historyRetryAt = 0;
   private walletReads = new Map<string, Promise<WalletState>>();
   private sponsor?: KeyringPair;
   private sponsorBusy = new Set<string>();
@@ -57,9 +60,11 @@ export class Chain {
     await this.api?.disconnect();
     this.state.connected = false;
     this.state.verified = false;
-    const provider = new WsProvider(this.rpc, 6000, {}, 10_000);
-    provider.on('disconnected', () => { this.state.connected = false; });
-    provider.on('error', () => { this.state.error = 'The network connection is unavailable. Reconnecting…'; });
+    const provider = this.rpc.startsWith('http') ? new HttpProvider(this.rpc) : new WsProvider(this.rpc, 6000, {}, 10_000);
+    if(provider instanceof WsProvider){
+      provider.on('disconnected', () => { this.state.connected = false; });
+      provider.on('error', () => { this.state.error = 'The network connection is unavailable. Reconnecting…'; });
+    }
     const api = new ApiPromise({ provider, noInitWarn: true });
     this.api = api;
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -102,16 +107,18 @@ export class Chain {
   async refreshHead() {
     const api = this.requireApi();
     const finalizedHash = await api.rpc.chain.getFinalizedHead();
-    const [finalized, best] = await Promise.all([api.rpc.chain.getHeader(finalizedHash), api.rpc.chain.getHeader()]);
+    // Security decisions use finalized state. An optional best-head display read
+    // must not invalidate a successfully fetched finalized header.
+    const [finalized, best] = await Promise.all([api.rpc.chain.getHeader(finalizedHash), api.rpc.chain.getHeader().catch(() => undefined)]);
     this.state.connected = true;
     this.state.finalizedBlock = finalized.number.toNumber();
-    this.state.bestBlock = best.number.toNumber();
+    this.state.bestBlock = Math.max(this.state.finalizedBlock,best?.number.toNumber() ?? this.state.finalizedBlock);
     this.state.specVersion = api.runtimeVersion.specVersion.toNumber();
     this.state.error = undefined;
   }
   async refresh() {
     await this.refreshHead();
-    await this.scan();
+    if(Date.now() >= this.historyRetryAt) await this.scan();
   }
   async synchronizeForApproval(budgetMs = 20_000) {
     await this.refreshHead();
@@ -315,7 +322,12 @@ export class Chain {
         this.state.lastSyncedBlock = Number(await this.store.getMeta('cursor:' + NETWORK.genesis) ?? 0);
         return;
       }
-      try { await this.scanBlocks(owner); }
+      try { await this.scanBlocks(owner); this.historyRetryAt=0; this.state.historyError=undefined; }
+      catch(error){
+        this.historyRetryAt=Date.now()+60_000;
+        this.state.historyError='Historical RPC data is temporarily unavailable. The last completed indexing checkpoint is preserved.';
+        throw error;
+      }
       finally { await this.store.releaseLease('chain:' + NETWORK.genesis, owner); }
     })().finally(() => { this.scanning = undefined; });
     return this.scanning;
@@ -328,9 +340,10 @@ export class Chain {
     // block precedes signing, so older history cannot contain an award receipt.
     const proposals = [...await this.store.list<Award>('awards'), ...await this.store.list<PayoutRound>('rounds')];
     const preparedAwards = proposals.filter(award => award.callHash);
+    const invoiceBatches = await this.store.list<InvoiceBatch>('invoice_batches');
     const treasuries = await this.store.list<Treasury>('treasuries');
     const trackedTreasuries = new Set(treasuries.map(t => t.address));
-    const trackedCalls = new Set(preparedAwards.map(p => p.callHash!));
+    const trackedCalls = new Set([...preparedAwards.map(p => p.callHash!), ...invoiceBatches.map(b => b.callHash)]);
     // Include pending recipients: a round may fund and unlock within this scan.
     const trackedRecipients = new Set(proposals
       .flatMap(p => 'awards' in p ? p.awards.map(a => a.recipient) : [p.recipient]));
@@ -375,6 +388,7 @@ export class Chain {
       if (txHash && !block.block.extrinsics.some((tx: any) => tx.hash.toHex() === txHash)) throw new Error('The transaction is not present in this finalized block.');
       const awards = await this.store.list<Award>('awards');
       const rounds = await this.store.list<PayoutRound>('rounds');
+      const invoiceBatches = await this.store.list<InvoiceBatch>('invoice_batches');
       const treasuries = await this.store.list<Treasury>('treasuries');
       for (let index = 0; index < block.block.extrinsics.length; index++) {
         const events: any[] = records.filter((record: any) => record.phase.isApplyExtrinsic && record.phase.asApplyExtrinsic.toNumber() === index).map((record: any) => record.event);
@@ -402,6 +416,28 @@ export class Chain {
             const callHash = event.data[isNew ? 2 : 3].toHex();
             const award = awards.find(item => item.callHash === callHash);
             const round = rounds.find(item => item.callHash === callHash);
+            const invoiceBatch = invoiceBatches.find(item => item.callHash === callHash);
+            if (invoiceBatch) {
+              const treasury = treasuries.find(t => t.id === invoiceBatch.treasuryId)!;
+              if (!sameAddress(event.data[isNew ? 1 : 2].toString(), treasury.address)) continue;
+              let kind: Receipt['kind'] = 'approval';
+              if (event.method === 'MultisigExecuted') {
+                const success = fundingSucceeded(event.data[4].isOk, events.map(e => e.method)) && hasInvoiceSettlement(events, invoiceBatch);
+                if (invoiceBatch.status !== 'paid') invoiceBatch.status = success ? 'paid' : 'failed'; kind = success ? 'funding' : 'failed';
+                if (success) { invoiceBatch.fundingBlock = blockNumber; invoiceBatch.fundingTx = base.txHash; }
+                else if(invoiceBatch.status !== 'paid') invoiceBatch.failure = 'Settlement was not confirmed. Check the finalized receipt before retrying.';
+              } else if (event.method === 'MultisigCancelled') { if (invoiceBatch.status !== 'paid') invoiceBatch.status = 'cancelled'; kind = 'cancellation'; }
+              else if (!['paid','cancelled','failed'].includes(invoiceBatch.status)) invoiceBatch.status = 'awaiting_approval';
+              await this.store.saveInvoiceBatch(invoiceBatch);
+              for (const invoice of invoiceBatch.invoices) {
+                const latest = await this.store.invoice(invoice.id);
+                if (latest?.batchId !== invoiceBatch.id) continue;
+                await this.store.saveInvoice({ ...latest, status: invoiceBatch.status === 'paid' ? 'paid'
+                  : ['failed','cancelled'].includes(invoiceBatch.status) ? 'submitted' : 'awaiting_approval',
+                  batchId: ['failed','cancelled'].includes(invoiceBatch.status) ? undefined : invoiceBatch.id });
+              }
+              await this.store.saveReceipt({ ...base, awardId: invoiceBatch.id, kind });
+            }
             if (round) {
               const treasury = treasuries.find(t => t.id === round.treasuryId)!;
               if (!sameAddress(event.data[isNew ? 1 : 2].toString(), treasury.address)) continue;

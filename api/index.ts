@@ -29,7 +29,7 @@ export default {
       url.searchParams.delete('__route');
       const path = route === null ? url.pathname : '/api/' + route;
       const payload = ['GET', 'HEAD'].includes(request.method) ? undefined : await request.text();
-      if (payload && Buffer.byteLength(payload) > 65_536) return Response.json({ error: 'Request body is too large.' }, { status: 413 });
+      if (payload && Buffer.byteLength(payload) > (path === '/api/verify' ? 262_144 : 65_536)) return Response.json({ error: 'Request body is too large.' }, { status: 413 });
       const result = await app.inject({ method: request.method as 'GET' | 'POST', url: path + url.search,
         headers: Object.fromEntries(request.headers), payload });
       const headers = new Headers();

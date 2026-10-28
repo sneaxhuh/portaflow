@@ -6,7 +6,7 @@ import { verifyReceipt } from '../server/verify.js';
 const filename = process.argv[2];
 if (!filename) throw new Error('Usage: npm run verify:receipt -- path/to/receipt.json');
 const contents = readFileSync(filename, 'utf8');
-if (Buffer.byteLength(contents) > 65_536) throw new Error('Receipt must be under 65 KB.');
+if (Buffer.byteLength(contents) > 262_144) throw new Error('Receipt must be under 256 KB.');
 const document: unknown = JSON.parse(contents);
 const provider = new WsProvider(NETWORK.rpc, false, {}, 10_000);
 const api = new ApiPromise({ provider, noInitWarn: true });

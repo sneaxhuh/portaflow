@@ -12,6 +12,11 @@ import { createStore, type DataStore } from './store.js';
 import { Chain } from './chain.js';
 import { readAwardCsv } from '../shared/import.js';
 import { verifyReceipt } from './verify.js';
+import { programReport, programReportCsv } from '../shared/report.js';
+import { InvoiceChain } from './invoice-chain.js';
+import { registerInvoiceRoutes } from './invoice-routes.js';
+import type { InvoiceBatch } from '../shared/invoices.js';
+import {rpcReadFailureMessage} from '../shared/rpc-errors.js';
 
 function body(value: unknown): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected a JSON object.');
@@ -26,7 +31,7 @@ function integer(value: unknown, label: string, min: number, max: number) {
   return value;
 }
 
-export async function createApp(options: { store?: DataStore; chain?: Chain; connect?: boolean; serve?: boolean; serverless?: boolean } = {}) {
+export async function createApp(options: { store?: DataStore; chain?: Chain; invoiceChain?: InvoiceChain; connect?: boolean; serve?: boolean; serverless?: boolean } = {}) {
   await cryptoWaitReady();
   const store = options.store ?? await createStore();
   const chain = options.chain ?? new Chain(store, undefined, !options.serverless);
@@ -53,6 +58,8 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
   });
   app.setErrorHandler((error, _request, reply) => {
     const failure = error as Error & { statusCode?: number };
+    const rpcMessage=rpcReadFailureMessage(failure);
+    if(rpcMessage)return reply.code(503).send({error:rpcMessage});
     if (/^Mongo/.test(failure.name)) {
       const duplicate = (failure as Error & { code?: number }).code === 11000;
       return reply.code(duplicate ? 409 : 503).send({ error: duplicate ? 'This record already exists. Refresh before retrying.' : 'The database is temporarily unavailable. Please try again shortly.' });
@@ -69,6 +76,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     if (!treasury) throw Object.assign(new Error('Treasury not found.'), { statusCode: 404 });
     return treasury;
   }
+  registerInvoiceRoutes(app, { store, chain, auth, settlement: options.invoiceChain ?? new InvoiceChain(chain) });
   async function getAward(id: string) {
     const award = await store.award(id);
     if (!award) throw Object.assign(new Error('Award not found.'), { statusCode: 404 });
@@ -76,11 +84,12 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
   }
   const id = (request: any) => request.params.id as string;
   app.get('/api/health', async () => ({ ok: true, name: 'PortaFlow', network: chain.state }));
-  app.get('/api/overview', async request => ({
-    network: chain.state, treasuries: await store.list<Treasury>('treasuries'), awards: await store.list<Award>('awards'),
-    rounds: await store.list<PayoutRound>('rounds'),
-    session: (request as any).walletAddress ? { address: (request as any).walletAddress } : null,
-  }));
+  app.get('/api/overview', async (request,reply) => {
+    reply.header('Cache-Control','private, no-store');
+    const [treasuries,awards,rounds,batches]=await Promise.all([store.list<Treasury>('treasuries'),store.list<Award>('awards'),store.list<PayoutRound>('rounds'),store.list<InvoiceBatch>('invoice_batches')]);
+    const address=(request as any).walletAddress;
+    return {network:chain.state,treasuries,awards,rounds,invoiceBatches:batches.filter(b=>treasuries.find(t=>t.id===b.treasuryId)?.signatories.includes(address)),session:address?{address}:null};
+  });
   app.post('/api/auth/challenge', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async request => {
     const data = body(request.body);
     const address = normalizeAddress(data.address);
@@ -98,6 +107,18 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     return { ok: true };
   });
   app.get('/api/wallet/:address', async request => chain.wallet(normalizeAddress((request.params as any).address)));
+  app.get('/api/programs/:id/report', async (request, reply) => {
+    const treasury = await getTreasury(id(request));
+    await chain.refreshHead();
+    const [awards, rounds, cursor] = await Promise.all([store.list<Award>('awards'), store.list<PayoutRound>('rounds'), store.getMeta('cursor:' + NETWORK.genesis)]);
+    const report = programReport(treasury, awards, rounds, chain.state.finalizedBlock, Number(cursor ?? chain.state.lastSyncedBlock));
+    reply.header('Cache-Control', 'private, no-store');
+    const format = (request.query as { format?: string }).format;
+    if (format === 'csv') return reply.header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', 'attachment; filename="portaflow-' + treasury.id + '-report.csv"').send(programReportCsv(report));
+    if (format && format !== 'json') throw new Error('Choose JSON or CSV report format.');
+    return report;
+  });
   app.post('/api/treasuries', async request => {
     const creator = auth(request);
     const data = body(request.body);
@@ -282,7 +303,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
     return { application: 'PortaFlow', version: 2, network: NETWORK, round,
       treasury: await getTreasury(round.treasuryId), transactions: await store.receipts(round.id) };
   });
-  app.post('/api/verify', { config: { rateLimit: { max: 8, timeWindow: '1 minute' } } }, async request => {
+  app.post('/api/verify', { bodyLimit: 262_144, config: { rateLimit: { max: 8, timeWindow: '1 minute' } } }, async request => {
     await chain.ready();
     return verifyReceipt(chain.requireApi(), request.body);
   });
@@ -303,7 +324,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; con
       pendingRaw: proposals.filter(p => p.status === 'awaiting_approval').reduce((s, p) => s + BigInt(p.totalRaw), 0n).toString(),
       draftsRaw: proposals.filter(p => p.status === 'draft').reduce((s, p) => s + BigInt(p.totalRaw), 0n).toString(),
       fundedRaw: proposals.filter(p => p.status === 'funded').reduce((s, p) => s + BigInt(p.totalRaw), 0n).toString(),
-      signerFeesRaw: fees.toString(), pendingDeposits, historyAvailable: chain.state.lastSyncedBlock >= chain.state.finalizedBlock } satisfies TreasuryLedger;
+      signerFeesRaw: fees.toString(), pendingDeposits, historyAvailable: chain.state.lastSyncedBlock >= chain.state.finalizedBlock,historyError:chain.state.historyError } satisfies TreasuryLedger;
   });
   app.get('/api/recipient/:address', async request => {
     const recipient = normalizeAddress((request.params as any).address);

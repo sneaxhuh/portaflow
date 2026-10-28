@@ -2,11 +2,16 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Award, Receipt, Treasury, PayoutRound, LedgerEntry } from '../shared/types.js';
+import type { Invoice, InvoiceBatch } from '../shared/invoices.js';
 
 export type Challenge = { id: string; address: string; message: string; expires: number };
 export type Session = { address: string; expires: number };
 export interface DataStore {
-  list<T>(table: 'treasuries' | 'awards' | 'rounds'): Promise<T[]>;
+  list<T>(table: 'treasuries' | 'awards' | 'rounds' | 'invoices' | 'invoice_batches'): Promise<T[]>;
+  invoice(id: string): Promise<Invoice | undefined>;
+  saveInvoice(invoice: Invoice): Promise<void>;
+  invoiceBatch(id: string): Promise<InvoiceBatch | undefined>;
+  saveInvoiceBatch(batch: InvoiceBatch): Promise<void>;
   treasury(id: string): Promise<Treasury | undefined>;
   award(id: string): Promise<Award | undefined>;
   saveTreasury(treasury: Treasury): Promise<void>;
@@ -43,6 +48,8 @@ export class Store implements DataStore {
       'CREATE TABLE IF NOT EXISTS treasuries (id TEXT PRIMARY KEY, data TEXT NOT NULL);',
       'CREATE TABLE IF NOT EXISTS awards (id TEXT PRIMARY KEY, call_hash TEXT UNIQUE, data TEXT NOT NULL);',
       'CREATE TABLE IF NOT EXISTS rounds (id TEXT PRIMARY KEY, call_hash TEXT UNIQUE, data TEXT NOT NULL);',
+      'CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, data TEXT NOT NULL);',
+      'CREATE TABLE IF NOT EXISTS invoice_batches (id TEXT PRIMARY KEY, call_hash TEXT UNIQUE, data TEXT NOT NULL);',
       'CREATE TABLE IF NOT EXISTS ledger (id TEXT PRIMARY KEY, treasury_id TEXT NOT NULL, block_number INTEGER NOT NULL, data TEXT NOT NULL);',
       'CREATE INDEX IF NOT EXISTS ledger_treasury ON ledger(treasury_id, block_number);',
       'CREATE TABLE IF NOT EXISTS receipts (tx_hash TEXT NOT NULL, award_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (tx_hash, award_id));',
@@ -53,9 +60,19 @@ export class Store implements DataStore {
       'CREATE TABLE IF NOT EXISTS leases (key TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL);',
     ].join('\n'));
   }
-  async list<T>(table: 'treasuries' | 'awards' | 'rounds'): Promise<T[]> {
+  async list<T>(table: 'treasuries' | 'awards' | 'rounds' | 'invoices' | 'invoice_batches'): Promise<T[]> {
     return (this.db.prepare('SELECT data FROM ' + table + ' ORDER BY rowid DESC').all() as { data: string }[]).map(row => JSON.parse(row.data));
   }
+  async invoice(id: string) {
+    const row = this.db.prepare('SELECT data FROM invoices WHERE id = ?').get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) as Invoice : undefined;
+  }
+  async saveInvoice(invoice: Invoice) { this.db.prepare('INSERT INTO invoices (id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(invoice.id, JSON.stringify(invoice)); }
+  async invoiceBatch(id: string) {
+    const row = this.db.prepare('SELECT data FROM invoice_batches WHERE id = ?').get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) as InvoiceBatch : undefined;
+  }
+  async saveInvoiceBatch(batch: InvoiceBatch) { this.db.prepare('INSERT INTO invoice_batches (id,call_hash,data) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET call_hash=excluded.call_hash,data=excluded.data').run(batch.id,batch.callHash,JSON.stringify(batch)); }
   async treasury(id: string): Promise<Treasury | undefined> {
     const row = this.db.prepare('SELECT data FROM treasuries WHERE id = ?').get(id) as { data: string } | undefined;
     return row ? JSON.parse(row.data) : undefined;

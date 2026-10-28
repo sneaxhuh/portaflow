@@ -4,6 +4,30 @@ import type { ApiPromise } from '@polkadot/api';
 import { request } from '../web/api';
 import { Store } from '../server/store';
 import { Chain } from '../server/chain';
+import {rpcReadFailureMessage} from '../shared/rpc-errors';
+
+test('optional best-header RPC failure does not block verified finalized state; finalized-header failure still blocks',async()=>{
+  const store=new Store(':memory:'),chain=new Chain(store,undefined,false);let failFinalized=false;
+  chain.state.verified=true;
+  chain.api={isConnected:true,runtimeVersion:{specVersion:{toNumber:()=>3002}},rpc:{chain:{
+    getFinalizedHead:async()=> 'finalized-hash',
+    getHeader:async(hash?:string)=>{
+      if(!hash)throw new Error('[503]: Failed HTTP Request: {"method":"chain_getHeader","params":[]}');
+      if(failFinalized)throw new Error('Finalized header unavailable');
+      return {number:{toNumber:()=>207492}};
+    },
+  }}} as unknown as ApiPromise;
+  try{
+    await chain.refreshHead();assert.equal(chain.state.finalizedBlock,207492);assert.equal(chain.state.bestBlock,207492);
+    failFinalized=true;await assert.rejects(()=>chain.refreshHead(),/Finalized header unavailable/);
+    assert.equal(chain.state.finalizedBlock,207492);
+  }finally{chain.api=undefined;await store.close();}
+});
+test('header read errors explain uncertain transaction status and do not hide dispatch or submission failures',()=>{
+  assert.match(rpcReadFailureMessage(new Error('[503]: Failed HTTP Request: {"method":"chain_getHeader","params":[]}'))!,/refresh the payment status/);
+  assert.equal(rpcReadFailureMessage(new Error('balances.InsufficientBalance')),undefined);
+  assert.equal(rpcReadFailureMessage(new Error('[503]: Failed HTTP Request: {"method":"author_submitExtrinsic","params":[]}')),undefined);
+});
 
 test('concurrent identical reads share transport but a completed balance is fetched afresh', async () => {
   const original = globalThis.fetch;

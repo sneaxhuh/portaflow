@@ -1,5 +1,6 @@
 import { MongoClient, MongoServerError, type Db, type Collection, type Document } from 'mongodb';
 import type { Award, Receipt, Treasury, PayoutRound, LedgerEntry } from '../shared/types.js';
+import type { Invoice, InvoiceBatch } from '../shared/invoices.js';
 import type { Challenge, DataStore, Session } from './store.js';
 
 type Entry<T> = { _id: string; data: T; callHash?: string };
@@ -23,14 +24,20 @@ export class MongoStore implements DataStore {
       this.db.collection('treasuries').createIndex({ 'data.address': 1 }, { unique: true }),
       this.db.collection('awards').createIndex({ callHash: 1 }, { unique: true, partialFilterExpression: { callHash: { $type: 'string' } } }),
       this.db.collection('rounds').createIndex({ callHash: 1 }, { unique: true, partialFilterExpression: { callHash: { $type: 'string' } } }),
+      this.db.collection('invoices').createIndex({ 'data.treasuryId': 1, 'data.issuer': 1 }),
+      this.db.collection('invoice_batches').createIndex({ callHash: 1 }, { unique: true }),
       this.db.collection('ledger').createIndex({ 'data.treasuryId': 1, 'data.blockNumber': -1 }),
       this.db.collection('receipts').createIndex({ 'data.awardId': 1, 'data.blockNumber': 1 }),
       ...['sessions', 'challenges'].map(name => this.db.collection(name).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })),
     ]);
   }
-  async list<T>(table: 'treasuries' | 'awards' | 'rounds'): Promise<T[]> {
+  async list<T>(table: 'treasuries' | 'awards' | 'rounds' | 'invoices' | 'invoice_batches'): Promise<T[]> {
     return (await this.collection<Entry<T>>(table).find({}).sort({ 'data.createdAt': -1, _id: -1 }).toArray()).map(row => row.data);
   }
+  async invoice(id: string) { return (await this.collection<Entry<Invoice>>('invoices').findOne({ _id: id }))?.data; }
+  async saveInvoice(invoice: Invoice) { await this.collection<Entry<Invoice>>('invoices').replaceOne({ _id: invoice.id }, { data: invoice }, { upsert: true }); }
+  async invoiceBatch(id: string) { return (await this.collection<Entry<InvoiceBatch>>('invoice_batches').findOne({ _id: id }))?.data; }
+  async saveInvoiceBatch(batch: InvoiceBatch) { await this.collection<Entry<InvoiceBatch>>('invoice_batches').replaceOne({ _id: batch.id }, { data: batch, callHash: batch.callHash }, { upsert: true }); }
   async treasury(id: string) { return (await this.collection<Entry<Treasury>>('treasuries').findOne({ _id: id }))?.data; }
   async award(id: string) { return (await this.collection<Entry<Award>>('awards').findOne({ _id: id }))?.data; }
   async saveTreasury(treasury: Treasury) {
