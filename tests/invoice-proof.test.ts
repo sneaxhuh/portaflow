@@ -124,6 +124,21 @@ test('invoice preparation reports an unfunded treasury before attempting a contr
   await assert.rejects(()=>settlement.prepare(receipt.batch,receipt.treasury),/Fund the treasury first: it has 0 tPOT spendable/);
  }finally{await store.close();}
 });
+test('uncertain submission recovers its exact finalized call without signing or resubmission',async()=>{
+ const {api,receipt,extrinsic}=fixture(),store=new Store(':memory:'),chain=new Chain(store,undefined,false),indexed:any[]=[];
+ chain.api=api;(api as any).isConnected=true;chain.state.verified=true;chain.refreshHead=async()=>{chain.state.finalizedBlock=42;};
+ chain.syncTransactions=async refs=>{indexed.push(...refs);return refs.map(r=>r.txHash);};
+ const reference={txHash:receipt.batch.fundingTx!,callHash:extrinsic.method.hash.toHex(),signer:one.address,nextBlock:42};
+ try{
+  const recovered=await chain.reconcileTransaction(reference);assert.equal(recovered.status,'finalized');assert.equal(recovered.success,true);
+  assert.equal(indexed.length,1);assert.equal(indexed[0].txHash,reference.txHash);
+  await assert.rejects(()=>chain.reconcileTransaction({...reference,signer:two.address}),/does not match/);
+  await assert.rejects(()=>chain.reconcileTransaction({...reference,callHash:zeroHash}),/does not match/);
+  assert.equal(indexed.length,1);
+  const pending=await chain.reconcileTransaction({...reference,txHash:zeroHash});assert.equal(pending.status,'pending');assert.equal(pending.nextBlock,43);
+  assert.equal(indexed.length,1);
+ }finally{chain.api=undefined;await store.close();}
+});
 test('failed history scans back off without blocking fresh chain heads or discarding their checkpoint',async()=>{
  const store=new Store(':memory:'),chain=new Chain(store,undefined,false);let heads=0,scans=0;
  try{

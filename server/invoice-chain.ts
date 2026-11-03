@@ -6,6 +6,7 @@ import { settlementAbi, invoiceTokenAbi } from '../shared/settlement-abi.js';
 import code from '../shared/settlement-code.json' with { type: 'json' };
 import type { Chain } from './chain.js';
 import {pendingSettlementDeployment} from './settlement-deployment.js';
+import {retryingTransport} from '../shared/rpc-policy.js';
 
 const asAddress = (value: string) => {
   if (!/^0x[0-9a-f]{40}$/i.test(value) || /^0x0{40}$/i.test(value)) throw new Error('Configure a valid settlement contract address.');
@@ -17,7 +18,7 @@ export const reviveCallReverted = (flags: {bits?: {toString(): string};toString(
   (BigInt((flags.bits ?? flags).toString()) & 1n) !== 0n;
 
 export class InvoiceChain {
-  client = createPublicClient({ transport: http(process.env.PORTAFLOW_EVM_RPC || 'https://test-evm-rpc-v3.portaldot.dev', { timeout: 10_000, retryCount: 0 }) });
+  client = createPublicClient({ transport: retryingTransport(http(process.env.PORTAFLOW_EVM_RPC || 'https://test-evm-rpc-v3.portaldot.dev', { timeout: 5000, retryCount: 0 })) });
   constructor(public chain: Chain, public address = process.env.PORTAFLOW_SETTLEMENT_ADDRESS || '') {}
   async snapshot() {
     await this.chain.ready(); await this.chain.refreshHead();
@@ -108,7 +109,7 @@ export class InvoiceChain {
       if(reviveCallReverted(result.result.asOk.flags))throw new Error('The settlement contract rejected this payment during simulation. No payment was submitted.');
       const required = result.weightRequired ?? result.gasRequired;
       batch.weight = { refTime: bump(required.refTime.toString()), proofSize: bump(required.proofSize.toString()) };
-      const deposit = result.storageDeposit;
+      const deposit = result.maxStorageDeposit ?? result.storageDeposit;
       batch.storageDepositRaw = deposit.isCharge ? bump(deposit.asCharge.toString()) : '0';
     } else {
       const balance = await this.client.readContract({ address: asset.token, abi: invoiceTokenAbi, functionName: 'balanceOf', args: [batch.payer], blockNumber: block });

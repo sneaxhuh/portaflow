@@ -9,6 +9,7 @@ import type { DataStore } from './store.js';
 import { awardTermsHash, fundingCall, transactionFromCall, roundFundingCall, roundTermsHash } from '../shared/calls.js';
 import type { InvoiceBatch } from '../shared/invoices.js';
 import { hasInvoiceSettlement } from '../shared/invoice-events.js';
+import {withRpcReadRetries} from '../shared/rpc-policy.js';
 
 export const initialNetwork = (): NetworkState => ({
   connected: false, verified: false, name: NETWORK.name, genesis: NETWORK.genesis,
@@ -60,7 +61,7 @@ export class Chain {
     await this.api?.disconnect();
     this.state.connected = false;
     this.state.verified = false;
-    const provider = this.rpc.startsWith('http') ? new HttpProvider(this.rpc) : new WsProvider(this.rpc, 6000, {}, 10_000);
+    const provider = withRpcReadRetries(this.rpc.startsWith('http') ? new HttpProvider(this.rpc) : new WsProvider(this.rpc, 6000, {}, 5000));
     if(provider instanceof WsProvider){
       provider.on('disconnected', () => { this.state.connected = false; });
       provider.on('error', () => { this.state.error = 'The network connection is unavailable. Reconnecting…'; });
@@ -325,7 +326,7 @@ export class Chain {
       try { await this.scanBlocks(owner); this.historyRetryAt=0; this.state.historyError=undefined; }
       catch(error){
         this.historyRetryAt=Date.now()+60_000;
-        this.state.historyError='Historical RPC data is temporarily unavailable. The last completed indexing checkpoint is preserved.';
+        this.state.historyError='Portaldot archive reads are temporarily unavailable. The last completed indexing checkpoint is preserved; recovery will resume automatically.';
         throw error;
       }
       finally { await this.store.releaseLease('chain:' + NETWORK.genesis, owner); }
@@ -485,6 +486,26 @@ export class Chain {
           }
         }
       }
+  }
+  async reconcileTransaction(input:{txHash:string;callHash:string;signer:string;nextBlock:number}) {
+    await this.refreshHead();const api=this.requireApi();
+    const end=Math.min(this.state.finalizedBlock,input.nextBlock+3);
+    const blocks=await Promise.all(Array.from({length:Math.max(0,end-input.nextBlock+1)},async(_,offset)=>{
+      const hash=await api.rpc.chain.getBlockHash(input.nextBlock+offset);
+      return{hash,block:await api.rpc.chain.getBlock(hash)};
+    }));
+    for(const {hash,block} of blocks){
+      const index=block.block.extrinsics.findIndex(tx=>tx.hash.toHex()===input.txHash);if(index<0)continue;
+      const at=await api.at(hash),tx=at.registry.createType('Extrinsic',block.block.extrinsics[index].toHex());
+      if(!tx.isSigned||normalizeAddress(tx.signer.toString())!==input.signer||tx.method.hash.toHex()!==input.callHash)throw new Error('This transaction does not match your saved signing request.');
+      const records:any=await at.query.system.events();
+      const events:any[]=records.filter((r:any)=>r.phase.isApplyExtrinsic&&r.phase.asApplyExtrinsic.toNumber()===index).map((r:any)=>r.event);
+      const execution=events.find(e=>e.section==='multisig'&&e.method==='MultisigExecuted');
+      const success=events.some(e=>e.section==='system'&&e.method==='ExtrinsicSuccess')&&!execution?.data[4].isErr&&!events.some(e=>['ExtrinsicFailed','BatchInterrupted'].includes(e.method));
+      await this.syncTransactions([{txHash:input.txHash,blockHash:hash.toHex()}]);
+      return{status:'finalized' as const,nextBlock:end+1,blockHash:hash.toHex(),success};
+    }
+    return{status:'pending' as const,nextBlock:Math.max(input.nextBlock,end+1)};
   }
   async syncTransactions(transactions: { txHash: string; blockHash: string }[]) {
     await this.refreshHead();

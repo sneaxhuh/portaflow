@@ -228,6 +228,13 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; inv
     reply.header('Content-Disposition', 'attachment; filename="portaflow-' + award.id + '.json"');
     return { application: 'PortaFlow', version: 1, network: NETWORK, award, treasury: await getTreasury(award.treasuryId), transactions: await store.receipts(award.id) };
   });
+  app.post('/api/transactions/reconcile', async request => {
+    const signer=auth(request),data=body(request.body);
+    if(data.signer!==signer)throw Object.assign(new Error('Connect the wallet that signed this transaction.'),{statusCode:403});
+    for(const key of ['txHash','callHash'])if(typeof data[key]!=='string'||!/^0x[0-9a-f]{64}$/i.test(data[key]))throw new Error('Provide a valid saved transaction reference.');
+    const fromBlock=integer(data.fromBlock,'Submission block',1,Number.MAX_SAFE_INTEGER),nextBlock=integer(data.nextBlock,'Recovery block',fromBlock,Number.MAX_SAFE_INTEGER-4);
+    return chain.reconcileTransaction({signer,txHash:data.txHash,callHash:data.callHash,nextBlock});
+  });
   app.post('/api/sync', async request => {
     auth(request);
     const transactions = body(request.body).transactions;
