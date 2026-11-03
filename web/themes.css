@@ -251,3 +251,10 @@ body.portaflow-redesign .table [data-slot=table-row], body.portaflow-redesign .a
   body.portaflow-redesign .op-detail-grid > aside { display: flex; flex-direction: column; }
   body.portaflow-redesign .op-detail-grid > aside > * { width: 100%; }
 }
+.transaction-recovery{border:1px solid var(--border,#d4d4d4);border-radius:10px;padding:18px;margin-bottom:24px;background:var(--card,transparent);overflow-wrap:anywhere}
+.transaction-recovery>div:first-child{display:flex;gap:12px;align-items:flex-start}
+.transaction-recovery p{font-size:13px;line-height:1.6;margin:6px 0}
+.transaction-recovery-row{display:flex;gap:16px;justify-content:space-between;align-items:center;padding-top:14px;margin-top:14px;border-top:1px solid var(--border,#d4d4d4)}
+.transaction-recovery-row span{display:grid;gap:5px;min-width:0;font-size:13px}
+.transaction-recovery-row code,.transaction-recovery-row small{font-size:12px;opacity:.8}
+@media(max-width:520px){.transaction-recovery-row{align-items:flex-start;flex-direction:column}}

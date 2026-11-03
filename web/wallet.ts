@@ -10,6 +10,8 @@ import { request } from './api';
 import { rememberReceipt } from './receipts';
 import { invoiceMessage, invoiceTermsHash, verifyInvoiceSignature, type Invoice } from '../shared/invoices';
 import { matchesRuntimeCode } from '../shared/runtime-code';
+import {withRpcReadRetries} from '../shared/rpc-policy';
+import {pendingFor,rememberPending,forgetPending,PendingConfirmationError} from './transactions';
 export { syncFinalizedReceipts } from './receipts';
 export { request } from './api';
 
@@ -97,7 +99,7 @@ export async function signInvoice(invoice: Invoice): Promise<string> {
 let apiPromise: Promise<ApiPromise> | undefined;
 async function chainApi() {
   if (!apiPromise) apiPromise = import('@polkadot/api').then(({ ApiPromise, WsProvider }) =>
-    ApiPromise.create({ provider: new WsProvider(NETWORK.rpc), noInitWarn: true })).catch(error => { apiPromise = undefined; throw error; });
+    ApiPromise.create({ provider: withRpcReadRetries(new WsProvider(NETWORK.rpc,6000,{},5000)), noInitWarn: true })).catch(error => { apiPromise = undefined; throw error; });
   return apiPromise;
 }
 export async function signTransaction(plan: TransactionPlan, context: PlanContext, onProgress: (status: string) => void) {
@@ -107,6 +109,8 @@ export async function signTransaction(plan: TransactionPlan, context: PlanContex
   const account = available.find(a => same(a.address, plan.signer));
   if (!account) throw new Error('Select the same signing wallet used to prepare this transaction.');
   validatePlan(api, plan, context);
+  const transaction=transactionFromCall(api,plan.callHex),callHash=transaction.method.hash.toHex();
+  if(pendingFor(callHash,plan.signer,plan.kind))throw new Error('Confirmation pending for this action. Check the saved transaction before signing again.');
   if (context.invoiceBatch && plan.kind !== 'cancellation') {
     const snapshot = await api.at(await api.rpc.chain.getFinalizedHead());
     const code: any = await (snapshot.call as any).reviveApi.code(context.invoiceBatch.router);
@@ -130,20 +134,27 @@ export async function signTransaction(plan: TransactionPlan, context: PlanContex
     }
   }
   onProgress('Confirm in your wallet');
+  const head=await api.rpc.chain.getHeader(await api.rpc.chain.getFinalizedHead());
+  // Save the signed hash before the one submission attempt. A lost response cannot
+  // safely be interpreted as rejection, and must never trigger another signature.
+  await transaction.signAsync(account.signingAddress,{signer:extension.signer});
+  const signedHash=transaction.hash.toHex();
+  rememberPending({txHash:signedHash,callHash,signer:plan.signer,kind:plan.kind,treasuryId:context.treasury?.id,fromBlock:head.number.toNumber()+1,nextBlock:head.number.toNumber()+1,createdAt:new Date().toISOString()});
   return new Promise<string>((resolve, reject) => {
     let unsubscribe: (() => void) | undefined;
     let settled = false;
     const finish = (error?: Error, hash?: string) => {
       if (settled) return;
       settled = true; clearTimeout(timeout); unsubscribe?.();
-      if (error) reject(error); else resolve(hash!);
+      if (error) reject(pendingFor(callHash,plan.signer)?new PendingConfirmationError(signedHash):error); else resolve(hash!);
     };
-    const timeout = setTimeout(() => finish(new Error('Confirmation is taking longer than expected. Refresh the award before retrying; the transaction may still finalize.')), 120_000);
-    void transactionFromCall(api, plan.callHex).signAndSend(account.signingAddress, { signer: extension.signer }, result => {
+    const timeout = setTimeout(() => finish(new Error('Confirmation pending. The transaction reference is saved. Check its status below before signing again.')), 120_000);
+    void transaction.send(result => {
       onProgress(result.status.isFinalized ? 'Finalized' : result.status.isInBlock ? 'Included · waiting for finality' : 'Submitted to Portaldot');
       if (result.status.isDropped || result.status.isInvalid || result.status.isUsurped) return finish(new Error('The transaction was dropped or replaced. Refresh the award status.'));
       if (!result.status.isFinalized) return;
       rememberReceipt({ txHash: result.txHash.toHex(), blockHash: result.status.asFinalized.toHex() });
+      try{forgetPending(signedHash);}catch{/* Finality is known even if browser storage becomes unavailable. */}
       if (result.dispatchError) {
         let message = result.dispatchError.toString();
         if (result.dispatchError.isModule) {

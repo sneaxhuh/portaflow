@@ -12,6 +12,8 @@ import { Button } from './components/ui/button';
 import { ThemeToggle } from './ThemeToggle';
 import type { InvoiceBatch } from '../shared/invoices';
 import {rpcReadFailureMessage} from '../shared/rpc-errors';
+import {TransactionRecovery} from './TransactionRecovery';
+import {PendingConfirmationError} from './transactions';
 
 const RoundForm = lazy(() => import('./Operations').then(module => ({ default: module.RoundForm })));
 const RoundPage = lazy(() => import('./Operations').then(module => ({ default: module.RoundPage })));
@@ -224,6 +226,7 @@ export default function App() {
     try {
       const { signTransaction } = await import('./wallet');
       const txHash = await signTransaction(review.plan, review, setProgress);
+      setModal(null);setReview(null);
       if(review.settlementDeployment&&review.treasury){
         // Chain deployment has already succeeded. Never leave a button that can sign it again.
         setModal(null);setReview(null);
@@ -234,6 +237,9 @@ export default function App() {
         await request('/settlement/register',registration);localStorage.removeItem('portaflow-settlement-registration');
       }
       setModal(null); setToast('Transaction finalized on Portaldot');
+    } catch(error) {
+      if(error instanceof PendingConfirmationError){setModal(null);setReview(null);}
+      throw error;
     } finally {
       try { await syncFinalizedReceipts(); } catch { /* The verified receipt is retained for the next refresh. */ }
       await refresh(true);
@@ -278,7 +284,7 @@ export default function App() {
     <div className="workspace">
       <header className="topbar"><div className="breadcrumbs"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu size={19} /></button><span className="breadcrumb-workspace">{treasury?.name || 'Workspace'}</span><ChevronRight size={12} /><strong>{page === 'invoice' ? 'Invoice' : page === 'invoice-batch' ? 'Invoice batch' : page === 'award' ? 'Award details' : page === 'round' ? 'Payout round' : nav.find(n => n.key === page)?.label}</strong></div>
         <div className="topbar-actions"><ThemeToggle /><button className="icon-button refresh-button" aria-label="Refresh balances" title={refreshPending ? 'Updating balances…' : 'Refresh balances'} disabled={refreshPending} onClick={() => void refresh()}><RefreshCw size={15} className={refreshPending ? 'spin' : undefined} /></button><span className="testnet-label">Testnet</span><button className="wallet-button" onClick={openWallet}><Wallet size={15} />{address ? shortAddress(address) : 'Connect wallet'}<ChevronDown size={12} /></button></div></header>
-      <main data-page={page}><Suspense fallback={<LoadingPage />}>
+      <main data-page={page}><TransactionRecovery address={address} onRecovered={()=>void refresh(true)}/><Suspense fallback={<LoadingPage />}>
         {!networkReady && loaded && <div className="network-notice"><LoaderCircle size={15} className="spin" /><span>{network.error || 'Connecting to Portaldot V3. Chain actions become available after network verification.'}</span></div>}
         {!['award','round','invoice','invoice-batch','invoices'].includes(page) && <div className="page-heading"><div><div className="eyebrow">{page === 'overview' ? 'YOUR FUNDING WORKSPACE' : 'WORKSPACE / ' + page.replace('-', ' ').toUpperCase()}</div><h1>{page === 'overview' ? 'Overview' : nav.find(n => n.key === page)?.label}</h1><p>{page === 'overview' ? 'Shared payments and contributor funding.' : page === 'program' ? 'Share funding results and export a traceable program report.' : page === 'rounds' ? 'Pay a whole contributor round with one approval flow.' : page === 'ledger' ? 'Follow the funds, from treasury deposit to recipient.' : page === 'my-funds' ? 'Your funding, vesting progress, and unlocks across workspaces.' : page === 'verify' ? 'Check the payment against finalized Portaldot evidence.' : page === 'approvals' ? 'Review the exact terms before your treasury commits funds.' : page === 'treasury' ? 'A shared treasury, controlled by its signers.' : page === 'recipients' ? 'The people and teams your treasury has funded.' : 'Create and manage individual contributor payments.'}</p></div><div className="heading-actions">{page === 'treasury' && treasury && <button className="btn btn-outline" onClick={() => needWallet('treasury')}><Plus size={15} />New treasury</button>}{!['my-funds', 'verify', 'ledger', 'program'].includes(page) && createButton}</div></div>}
         {['invoices','invoice','invoice-batch'].includes(page) && <InvoicesPage treasury={treasury} treasuries={data.treasuries} address={address} block={network.finalizedBlock} view={page as 'invoices'|'invoice'|'invoice-batch'} id={awardId} busy={busy} onWallet={openWallet} open={go} onReview={value=>{setReview(value);setModal('review');}} />}
