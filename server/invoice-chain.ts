@@ -75,6 +75,11 @@ export class InvoiceChain {
     return { mapped: false as const, addresses: missing, plan: await this.chain.estimate(api.tx.revive.batchMapAccounts(missing), signer, 'invoice mapping') };
   }
   async paid(batch: InvoiceBatch) {
+    const snapshot=await this.snapshot(),scoped=Object.create(this) as InvoiceChain;
+    scoped.snapshot=async()=>snapshot;
+    return scoped.paidAt(batch);
+  }
+  private async paidAt(batch: InvoiceBatch) {
     await this.verified();
     if (batch.router.toLowerCase() !== this.address.toLowerCase() || batch.runtimeCodeHash !== code.runtimeCodeHash) throw new Error('This batch targets a different settlement installation.');
     const { block } = await this.snapshot();
@@ -133,7 +138,16 @@ export class InvoiceChain {
     return { ...batch, callHex: inner.method.toHex(), callHash: inner.method.hash.toHex() };
   }
   async approvalPlan(batch: InvoiceBatch, treasury: Treasury, signer: string, cancel = false): Promise<TransactionPlan> {
-    await this.chain.ready(); await this.chain.refreshHead();
+    if(cancel)return this.approvalPlanAt(batch,treasury,signer,true);
+    // One finalized snapshot per review. Repeated status, mapping and paid reads
+    // previously refreshed the chain serially and could exceed the API deadline.
+    const snapshot=await this.snapshot();
+    const scoped=Object.create(this) as InvoiceChain;
+    scoped.snapshot=async()=>snapshot;
+    return scoped.approvalPlanAt(batch,treasury,signer,false);
+  }
+  private async approvalPlanAt(batch: InvoiceBatch, treasury: Treasury, signer: string, cancel = false): Promise<TransactionPlan> {
+    if(cancel){await this.chain.ready();await this.chain.refreshHead();}
     if (!treasury.signatories.includes(signer)) throw new Error('Only a treasury signer can approve this batch.');
     const api = this.chain.requireApi(), pending = await this.chain.pending(treasury, batch);
     const others = treasury.signatories.filter(s => s !== signer);
@@ -144,13 +158,14 @@ export class InvoiceChain {
     if (!['draft', 'awaiting_approval'].includes(batch.status)) throw new Error('This payment batch is no longer open.');
     if (batch.specVersion !== this.chain.state.specVersion) throw new Error('The runtime changed. Cancel this proposal and create a new batch.');
     if (pending?.approvals.includes(signer)) throw new Error('Your wallet has already approved this batch.');
-    const paid = await this.paid(batch);
+    const [paid,maps,asset,wallet]=await Promise.all([
+      this.paid(batch),this.mappings([treasury.address,...batch.invoices.map(i=>i.recipient)]),
+      this.asset(batch.asset.id),this.chain.wallet(treasury.address),
+    ]);
     if (paid.some(value => value !== zeroHash)) throw new Error('A selected invoice is already settled. Refresh the payment state.');
-    const maps = await this.mappings([treasury.address, ...batch.invoices.map(i => i.recipient)]);
     if (maps.some(m => !m.mapped) || maps.find(m => m.native === treasury.address)?.address !== batch.payer
       || batch.invoices.some((i, n) => maps.find(m => m.native === i.recipient)?.address !== batch.recipients[n])) throw new Error('Account mappings changed. Cancel and recreate the batch.');
-    if (!sameAsset(await this.asset(batch.asset.id),batch.asset)) throw new Error('The payment asset changed. Cancel this proposal before creating a replacement.');
-    const wallet=await this.chain.wallet(treasury.address);
+    if (!sameAsset(asset,batch.asset)) throw new Error('The payment asset changed. Cancel this proposal before creating a replacement.');
     const requiredNative=(batch.asset.kind==='native'?BigInt(batch.totalRaw):0n)+BigInt(invoiceStorageLimit(batch));
     if(BigInt(wallet.spendableRaw)<requiredNative) throw new Error('The treasury needs more tPOT for these payments and contract storage.');
     if(batch.asset.kind==='asset' && await this.client.readContract({address:batch.asset.token,abi:invoiceTokenAbi,functionName:'balanceOf',args:[batch.payer],blockNumber:BigInt(this.chain.state.finalizedBlock)})<BigInt(batch.totalRaw)) throw new Error('The treasury no longer holds enough of this payment asset.');

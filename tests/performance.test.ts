@@ -4,7 +4,17 @@ import type { ApiPromise } from '@polkadot/api';
 import { request } from '../web/api';
 import { Store } from '../server/store';
 import { Chain } from '../server/chain';
+import {createApp} from '../server/app';
+import {NETWORK} from '../shared/types';
 import {rpcReadFailureMessage} from '../shared/rpc-errors';
+test('serverless native reads use HTTPS on the official node while the browser network remains WSS',async()=>{
+ const store=new Store(':memory:'),previous=process.env.PORTAFLOW_RPC,override=process.env.PORTAFLOW_SERVER_RPC;
+ process.env.PORTAFLOW_RPC=NETWORK.rpc;delete process.env.PORTAFLOW_SERVER_RPC;
+ try{
+  const {app,chain}=await createApp({store,connect:false,serve:false,serverless:true});
+  try{assert.equal(chain.rpc,'https://test-node-v3.portaldot.dev');assert.equal(NETWORK.rpc,'wss://test-node-v3.portaldot.dev');}finally{await app.close();}
+ }finally{if(previous===undefined)delete process.env.PORTAFLOW_RPC;else process.env.PORTAFLOW_RPC=previous;if(override===undefined)delete process.env.PORTAFLOW_SERVER_RPC;else process.env.PORTAFLOW_SERVER_RPC=override;}
+});
 
 test('optional best-header RPC failure does not block verified finalized state; finalized-header failure still blocks',async()=>{
   const store=new Store(':memory:'),chain=new Chain(store,undefined,false);let failFinalized=false;

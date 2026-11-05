@@ -201,8 +201,7 @@ export class Chain {
     return result;
   }
   async estimate(call: any, signer: string, kind: string, deposit = 0n): Promise<TransactionPlan> {
-    const info = await call.paymentInfo(signer);
-    const wallet = await this.wallet(signer);
+    const [info,wallet] = await Promise.all([call.paymentInfo(signer),this.wallet(signer)]);
     if (BigInt(wallet.spendableRaw) < BigInt(info.partialFee.toString()) + deposit) {
       throw new Error(deposit > 0n
         ? 'This signing wallet needs more tPOT for the estimated fee and refundable approval deposit.'

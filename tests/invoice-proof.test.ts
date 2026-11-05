@@ -105,10 +105,15 @@ test('invoice approvals use current contract and multisig state while global his
   chain.pending=async()=>null;
   chain.wallet=async(address)=>({address,freeRaw:'10000000000000000',spendableRaw:'10000000000000000',reservedRaw:'0',frozenRaw:'0',vestingLockRaw:'0',remainingLockedRaw:'0',eligibleUnlockRaw:'0',schedules:[]});
   chain.estimate=async(call,signer,kind)=>({callHex:call.method.toHex(),signer,kind,feeRaw:'1',depositRaw:'0',genesis:NETWORK.genesis,specVersion:1});
-  settlement.paid=async()=>[zeroHash];settlement.asset=async()=>({...NATIVE_ASSET});
+  settlement.address=receipt.batch.router;
+  let snapshots=0;
+  settlement.snapshot=async()=>{snapshots++;return{api,at:await api.at('0x'+'b'.repeat(64)),block:99999n};};
+  settlement.client={getChainId:async()=>420420777,getCode:async()=>artifact.deployedBytecode,readContract:async()=>zeroHash} as any;
+  settlement.asset=async()=>({...NATIVE_ASSET});
   settlement.mappings=async()=>[{native:receipt.treasury.address,address:receipt.batch.payer,mapped:true},{native:recipient.address,address:receipt.batch.recipients[0],mapped:true}];
   const b={...receipt.batch,status:'draft' as const};
   const plan=await settlement.approvalPlan(b,receipt.treasury,one.address);assert.equal(plan.kind,'approval');
+  assert.equal(snapshots,1,'status verification and paid checks must share one finalized snapshot per review');
   settlement.paid=async()=>[b.invoices[0].termsHash];
   await assert.rejects(()=>settlement.approvalPlan(b,receipt.treasury,one.address),/already settled/);
  }finally{await store.close();}

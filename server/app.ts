@@ -34,7 +34,11 @@ function integer(value: unknown, label: string, min: number, max: number) {
 export async function createApp(options: { store?: DataStore; chain?: Chain; invoiceChain?: InvoiceChain; connect?: boolean; serve?: boolean; serverless?: boolean } = {}) {
   await cryptoWaitReady();
   const store = options.store ?? await createStore();
-  const chain = options.chain ?? new Chain(store, undefined, !options.serverless);
+  const configuredRpc=process.env.PORTAFLOW_RPC||NETWORK.rpc;
+  // Frozen serverless instances cannot rely on a persistent WebSocket staying
+  // connected. The official node also serves native JSON-RPC over HTTPS.
+  const serverRpc=process.env.PORTAFLOW_SERVER_RPC||(options.serverless&&configuredRpc===NETWORK.rpc?'https://test-node-v3.portaldot.dev':configuredRpc);
+  const chain = options.chain ?? new Chain(store, serverRpc, !options.serverless);
   const app = Fastify({ logger: false, bodyLimit: 65_536, requestTimeout: 30_000,
     trustProxy: process.env.RENDER === 'true' || process.env.VERCEL === '1' ? (_address, hop) => hop === 0 : false });
   await app.register(cookie);
