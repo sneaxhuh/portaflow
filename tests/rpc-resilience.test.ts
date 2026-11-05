@@ -26,3 +26,19 @@ test('a read retry bypasses a provider cached failure and repeated decoration do
  withRpcReadRetries(provider);withRpcReadRetries(provider);
  assert.equal(await provider.send('chain_getHeader',[],true),'recovered');assert.deepEqual(cacheFlags,[true,false]);
 });
+test('WebSocket subscription registration and transaction status callbacks survive the retry wrapper',async()=>{
+ let sends=0;const notifications:string[]=[];
+ const subscription={type:'author_extrinsicUpdate',callback:(_error:unknown,status:string)=>notifications.push(status)};
+ const provider={
+  async send(_method:string,_params:unknown[],cacheable?:boolean,registration?:typeof subscription){
+   sends++;assert.equal(cacheable,false);assert.equal(registration,subscription);
+   registration!.callback(null,'ready');registration!.callback(null,'finalized');return 12;
+  },
+  // Mirrors WsProvider.subscribe's fourth internal send argument.
+  subscribe(){return this.send('author_submitAndWatchExtrinsic',['0x1234'],false,subscription);},
+  clone(){return this;},
+ };
+ withRpcReadRetries(provider as unknown as ProviderInterface);
+ assert.equal(await provider.subscribe(),12);
+ assert.equal(sends,1);assert.deepEqual(notifications,['ready','finalized']);
+});

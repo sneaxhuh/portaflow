@@ -141,6 +141,7 @@ export async function signTransaction(plan: TransactionPlan, context: PlanContex
   // Save the signed hash before the one submission attempt. A lost response cannot
   // safely be interpreted as rejection, and must never trigger another signature.
   const signed=await requestPayloadSignature(extension.signer,prepared.payload);
+  onProgress('Signed · submitting to Portaldot…');
   transaction.addSignature(account.signingAddress,signed.signature,prepared.payload);
   const signedHash=transaction.hash.toHex();
   rememberPending({txHash:signedHash,callHash,signer:plan.signer,kind:plan.kind,treasuryId:context.treasury?.id,fromBlock:prepared.fromBlock,nextBlock:prepared.fromBlock,createdAt:new Date().toISOString()});

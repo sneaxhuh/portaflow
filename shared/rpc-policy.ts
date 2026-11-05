@@ -27,9 +27,11 @@ export async function retryRpcRead<T>(operation:()=>Promise<T>,options:Options={
 const wrappedProviders=new WeakSet<object>();
 export function withRpcReadRetries<T extends ProviderInterface>(provider:T):T{
   if(wrappedProviders.has(provider))return provider;wrappedProviders.add(provider);
-  const send=provider.send.bind(provider),clone=provider.clone.bind(provider);
-  provider.send=(method,params,cacheable)=>{
-    if(!RETRYABLE_READS.has(method))return send(method,params,cacheable);
+  // WsProvider passes subscription registration as a fourth argument even
+  // though ProviderInterface exposes only the first three. Preserve it intact.
+  const send=provider.send.bind(provider) as (method:string,params:unknown[],cacheable?:boolean,...extra:unknown[])=>Promise<any>,clone=provider.clone.bind(provider);
+  provider.send=(method,params,cacheable,...extra:unknown[])=>{
+    if(extra.length||!RETRYABLE_READS.has(method))return send(method,params,cacheable,...extra);
     let attempt=0;
     return retryRpcRead(()=>send(method,params,attempt++===0?cacheable:false));
   };
