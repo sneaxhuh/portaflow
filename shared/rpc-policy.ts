@@ -2,7 +2,7 @@ import type {ProviderInterface} from '@polkadot/rpc-provider/types';
 import type {Transport} from 'viem';
 
 // An explicit allowlist: signing, submissions, subscriptions and unknown methods never retry.
-export const RETRYABLE_READS=new Set(['rpc_methods','system_chain','system_name','system_version','system_properties',
+export const RETRYABLE_READS=new Set(['rpc_methods','system_chain','system_name','system_version','system_properties','system_accountNextIndex',
   'chain_getHeader','chain_getBlock','chain_getBlockHash','chain_getFinalizedHead',
   'state_getMetadata','state_getRuntimeVersion','state_getStorage','state_getStorageAt','state_queryStorageAt','state_getKeysPaged','state_call',
   'payment_queryInfo','payment_queryFeeDetails','eth_chainId','eth_getCode','eth_call','eth_getBalance','eth_getBlockByNumber','eth_getTransactionReceipt']);

@@ -12,6 +12,7 @@ import { invoiceMessage, invoiceTermsHash, verifyInvoiceSignature, type Invoice 
 import { matchesRuntimeCode } from '../shared/runtime-code';
 import {withRpcReadRetries} from '../shared/rpc-policy';
 import {pendingFor,rememberPending,forgetPending,PendingConfirmationError} from './transactions';
+import {prepareSigningPayload,requestPayloadSignature} from './signing';
 export { syncFinalizedReceipts } from './receipts';
 export { request } from './api';
 
@@ -103,6 +104,7 @@ async function chainApi() {
   return apiPromise;
 }
 export async function signTransaction(plan: TransactionPlan, context: PlanContext, onProgress: (status: string) => void) {
+  onProgress('Preparing signing details…');
   await cryptoWaitReady();
   const api = await chainApi();
   const available = await accounts();
@@ -120,6 +122,8 @@ export async function signTransaction(plan: TransactionPlan, context: PlanContex
     }
   }
   const extension = await extensionFromSource(account.meta.source);
+  if(!extension.signer.signPayload)throw new Error('This wallet cannot sign native transactions. No transaction was submitted.');
+  const prepared=await prepareSigningPayload(api,account.signingAddress,transaction.method.toHex());
   if (extension.metadata) {
     const metadataKey = `${account.meta.source}:${NETWORK.genesis}:${plan.specVersion}`;
     // Re-provide once per page session to replace metadata registered by older builds.
@@ -134,12 +138,12 @@ export async function signTransaction(plan: TransactionPlan, context: PlanContex
     }
   }
   onProgress('Confirm in your wallet');
-  const head=await api.rpc.chain.getHeader(await api.rpc.chain.getFinalizedHead());
   // Save the signed hash before the one submission attempt. A lost response cannot
   // safely be interpreted as rejection, and must never trigger another signature.
-  await transaction.signAsync(account.signingAddress,{signer:extension.signer});
+  const signed=await requestPayloadSignature(extension.signer,prepared.payload);
+  transaction.addSignature(account.signingAddress,signed.signature,prepared.payload);
   const signedHash=transaction.hash.toHex();
-  rememberPending({txHash:signedHash,callHash,signer:plan.signer,kind:plan.kind,treasuryId:context.treasury?.id,fromBlock:head.number.toNumber()+1,nextBlock:head.number.toNumber()+1,createdAt:new Date().toISOString()});
+  rememberPending({txHash:signedHash,callHash,signer:plan.signer,kind:plan.kind,treasuryId:context.treasury?.id,fromBlock:prepared.fromBlock,nextBlock:prepared.fromBlock,createdAt:new Date().toISOString()});
   return new Promise<string>((resolve, reject) => {
     let unsubscribe: (() => void) | undefined;
     let settled = false;
