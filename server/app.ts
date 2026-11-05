@@ -359,7 +359,7 @@ export async function createApp(options: { store?: DataStore; chain?: Chain; inv
       if (path === '/api/health' || path.startsWith('/api/auth/') || path === '/api/treasuries' || path.endsWith('/receipt')) return;
       try {
         await chain.ready();
-        if (path === '/api/overview') await chain.refresh();
+        if (path === '/api/overview') await chain.refreshHead();
       } catch (error) {
         chain.state.connected = Boolean(chain.api?.isConnected);
         chain.state.error = 'Portaldot synchronization is temporarily unavailable. Please retry.';

@@ -38,6 +38,13 @@ test('header read errors explain uncertain transaction status and do not hide di
   assert.equal(rpcReadFailureMessage(new Error('balances.InsufficientBalance')),undefined);
   assert.equal(rpcReadFailureMessage(new Error('[503]: Failed HTTP Request: {"method":"author_submitExtrinsic","params":[]}')),undefined);
 });
+test('serverless overview restores workspace and session without triggering historical archive scans',async()=>{
+ const store=new Store(':memory:'),chain=new Chain(store,undefined,false);let heads=0;
+ chain.ready=async()=>{};chain.refreshHead=async()=>{heads++;};
+ chain.refresh=async()=>{throw new Error('Overview must not scan archive history');};
+ const {app}=await createApp({store,chain,serve:false,serverless:true});
+ try{const response=await app.inject('/api/overview');assert.equal(response.statusCode,200);assert.equal(heads,1);}finally{await app.close();}
+});
 
 test('concurrent identical reads share transport but a completed balance is fetched afresh', async () => {
   const original = globalThis.fetch;
